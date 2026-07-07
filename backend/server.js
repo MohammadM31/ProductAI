@@ -21,6 +21,8 @@ const allowedOrigins = [
   config.frontendUrl,
   'http://localhost:3000',
   'http://localhost:5173',
+  'https://frontend-1dmi.onrender.com',
+  'https://*.onrender.com',
 ]
 
 app.use(cors({
