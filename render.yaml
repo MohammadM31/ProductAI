@@ -1,13 +1,13 @@
 services:
   - type: web
-    name: creative-request-platform
+    name: productai
     runtime: node
     plan: free
     rootDir: backend
     buildCommand: npm install
     startCommand: node server.js
     healthCheckPath: /health
-    nodeVersion: 18.19.0  # Specify a specific Node version
+    nodeVersion: 18.19.0
     envVars:
       - key: NODE_ENV
         value: production
@@ -31,3 +31,9 @@ services:
         sync: false
       - key: FRONTEND_URL
         sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o
+      - key: OPENAI_IMAGE_MODEL
+        value: dall-e-2
+      - key: REPLICATE_IMAGE_MODEL
+        value: flux-schnell
