@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: creative-request-platform
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /health
+    nodeVersion: 18.19.0  # Specify a specific Node version
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: REPLICATE_API_KEY
+        sync: false
+      - key: OPENSEARCH_HOST
+        sync: false
+      - key: OPENSEARCH_USERNAME
+        sync: false
+      - key: OPENSEARCH_PASSWORD
+        sync: false
+      - key: OPENSEARCH_PORT
+        value: 9200
+      - key: OPENSEARCH_USE_SSL
+        value: true
+      - key: JWT_SECRET
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
