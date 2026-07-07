@@ -35,12 +35,12 @@ export const requestApi = {
 
   sendText: (text, sessionId, projectId) =>
     api.post('/api/request/text', { text, session_id: sessionId, project_id: projectId }, {
-      timeout: 120000 // 2 minutes
+      timeout: 120000
     }).then(r => r.data),
 
   iterate: (outputId, feedback, sessionId) =>
     api.post('/api/request/iterate', { output_id: outputId, feedback, session_id: sessionId }, {
-      timeout: 120000 // 2 minutes - 🔥 ADD THIS
+      timeout: 120000
     }).then(r => r.data),
 
   confirm: (outputId) =>
@@ -78,7 +78,7 @@ export const adminApi = {
   uploadGuidelinesZip: (formData) =>
     api.post('/api/admin/upload-guidelines-zip', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 120000, // 2 minutes for large ZIPs
+      timeout: 120000,
     }).then(r => r.data),
 }
 
