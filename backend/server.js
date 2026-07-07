@@ -17,38 +17,15 @@ const __dirname = path.dirname(__filename)
 
 const app = express()
 
-// ✅ COMPLETE CORS FIX - Allow all Render subdomains
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:5173',
-  'https://frontend-1dmi.onrender.com',
-  'https://productai-frontend.onrender.com',
-  /\.onrender\.com$/, // Allow all Render subdomains
-]
-
+// ============================================================
+// ✅ COMPLETE CORS FIX - Allow ALL origins for testing
+// ============================================================
 app.use(cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl)
-    if (!origin) return callback(null, true)
-    
-    // Check if origin is allowed
-    const isAllowed = allowedOrigins.some(allowed => {
-      if (typeof allowed === 'string') return origin === allowed
-      if (allowed instanceof RegExp) return allowed.test(origin)
-      return false
-    })
-    
-    if (isAllowed) {
-      callback(null, true)
-    } else {
-      console.log('🚫 CORS blocked:', origin)
-      callback(new Error(`CORS: origin ${origin} not allowed`))
-    }
-  },
+  origin: '*', // Allow all origins (for testing)
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   credentials: true,
-  optionsSuccessStatus: 200 // For legacy browsers
+  optionsSuccessStatus: 200
 }))
 
 // Handle preflight requests explicitly
@@ -122,10 +99,10 @@ async function start() {
   }
 
   const PORT = process.env.PORT || config.port || 10000
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Server running on port ${PORT} [${config.nodeEnv}]`)
-    console.log(`   Health: https://your-app.onrender.com/health`)
-    console.log(`   Root: https://your-app.onrender.com/`)
+    console.log(`   Health: /health`)
+    console.log(`   Root: /`)
   })
 }
 
