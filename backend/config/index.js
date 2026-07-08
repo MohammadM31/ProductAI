@@ -31,7 +31,7 @@ export const config = {
   },
 
   replicate: {
-    apiKey: process.env.REPLICATE_API_KEY || '',
+    apiKey: process.env.REPLICATE_API_TOKEN || '',
     imageModel: process.env.REPLICATE_IMAGE_MODEL || 'flux-schnell',
   },
 
