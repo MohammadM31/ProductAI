@@ -96,6 +96,7 @@ async function start() {
     await seedDemoData()
   } catch (err) {
     console.error('⚠️  Startup warning (continuing anyway):', err.message)
+    console.log('ℹ️  Continuing startup without OpenSearch...')
   }
 
   const PORT = process.env.PORT || config.port || 10000
