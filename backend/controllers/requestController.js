@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid'
-import { transcribeAudio } from '../services/whisperService.js'
+import { transcribeAudio } from '../services/deepgramService.js'//import { transcribeAudio } from '../services/whisperService.js'
 import {
   mapRequestToProject,
   generateOutput,

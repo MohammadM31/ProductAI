@@ -4,14 +4,27 @@ import { searchDocuments, indexDocument, getDocument } from './databaseService.j
 import { v4 as uuidv4 } from 'uuid'
 import { generateImageWithReplicate, generateImageWithFallback } from './replicateService.js'
 
-let openaiClient = null
+/*let openaiClient = null
 
 function getOpenAI() {
   if (!openaiClient) {
     openaiClient = new OpenAI({ apiKey: config.openai.apiKey })
   }
   return openaiClient
+}*/
+
+let deepseekClient = null
+
+function getDeepSeek() {
+  if (!deepseekClient) {
+    deepseekClient = new OpenAI({
+      apiKey: config.deepseek.apiKey,
+      baseURL: config.deepseek.baseURL || 'https://api.deepseek.com',
+    })
+  }
+  return deepseekClient
 }
+
 
 // ============================================================
 // AI-Powered Project Mapping with Department Awareness
@@ -30,7 +43,7 @@ export async function mapRequestToProject(requestText) {
   }
 
   try {
-    const openai = getOpenAI()
+     //const openai = getOpenAI()
     
     const departments = await searchDocuments(config.indices.departments, {
       query: { match_all: {} },
@@ -75,8 +88,11 @@ USER REQUEST: "${requestText}"
 
 Analyze what the user wants to create and which project best matches their intent. Reply with ONLY the project ID.`
 
-    const resp = await openai.chat.completions.create({
-      model: config.openai.model,
+    /*const resp = await openai.chat.completions.create({
+      model: config.openai.model,*/
+      const deepseek = getDeepSeek()
+const resp = await deepseek.chat.completions.create({
+  model: config.deepseek.model || 'deepseek-chat',
       max_tokens: 50,
       temperature: 0.1,
       messages: [
@@ -242,7 +258,7 @@ export async function generateOutput(userRequest, project) {
 // Generate Image Output with Dynamic Vision Analysis
 // ============================================================
 async function generateImageOutput(userRequest, project) {
-  const openai = getOpenAI()
+  const deepseek = getDeepSeek() //const openai = getOpenAI()
   const systemPrompt = buildSystemPrompt(project)
 
   let referenceImageUrl = null
@@ -257,9 +273,12 @@ async function generateImageOutput(userRequest, project) {
       console.log('🖼️ Analyzing reference image dynamically...')
       
       // Use GPT-4 Vision to understand the image with timeout
-      const analysis = await Promise.race([
+      /*const analysis = await Promise.race([
         openai.chat.completions.create({
-          model: 'gpt-4o',
+          model: 'gpt-4o',*/
+          const analysis = await Promise.race([
+            deepseek.chat.completions.create({
+              model: config.deepseek.model || 'deepseek-chat',
           max_tokens: 300,
           messages: [
             {
@@ -289,7 +308,7 @@ async function generateImageOutput(userRequest, project) {
         )
       ])
       
-      imageDescription = analysis.choices[0].message.content
+      imageDescription = await analyzeImageWithDeepSeek(referenceImageUrl)  //imageDescription = analysis.choices[0].message.content
       console.log('📸 Reference image understood:', imageDescription.substring(0, 150) + '...')
       
     } catch (err) {
@@ -299,8 +318,10 @@ async function generateImageOutput(userRequest, project) {
   }
 
   // Generate prompt using the dynamic analysis
-  const promptResponse = await openai.chat.completions.create({
-    model: config.openai.model,
+  /*const promptResponse = await openai.chat.completions.create({
+    model: config.openai.model,*/
+    const promptResponse = await deepseek.chat.completions.create({
+      model: config.deepseek.model || 'deepseek-chat',
     max_tokens: 600,
     messages: [
       {
@@ -399,11 +420,14 @@ Create a prompt based on the user's request.
 // Generate Text Output
 // ============================================================
 async function generateTextOutput(userRequest, project) {
-  const openai = getOpenAI()
+  /*const openai = getOpenAI()
   const systemPrompt = buildSystemPrompt(project)
 
   const response = await openai.chat.completions.create({
-    model: config.openai.model,
+    model: config.openai.model,*/
+    const deepseek = getDeepSeek()
+const response = await deepseek.chat.completions.create({
+  model: config.deepseek.model || 'deepseek-chat',
     max_tokens: 1500,
     messages: [
       {
@@ -423,6 +447,36 @@ async function generateTextOutput(userRequest, project) {
   }
 }
 
+async function analyzeImageWithDeepSeek(imageData) {
+  const deepseek = getDeepSeek()
+  
+  try {
+    const response = await deepseek.chat.completions.create({
+      model: config.deepseek.visionModel || 'deepseek-vl',
+      max_tokens: 300,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: 'Describe this image in detail...',
+            },
+            {
+              type: 'image_url',
+              image_url: { url: imageData },
+            },
+          ],
+        },
+      ],
+    })
+    return response.choices[0].message.content
+  } catch (err) {
+    console.warn('⚠️ Image analysis failed:', err.message)
+    return 'Reference image for style guidance.'
+  }
+}
+
 // ============================================================
 // Iterate Output (revision)
 // ============================================================
@@ -431,11 +485,13 @@ export async function iterateOutput(originalRequest, feedback, previousContent, 
     return generateImageOutput(`${originalRequest}. Modifications requested: ${feedback}`, project)
   }
 
-  const openai = getOpenAI()
+  const deepseek = getDeepSeek()//const openai = getOpenAI()
   const systemPrompt = buildSystemPrompt(project)
 
-  const response = await openai.chat.completions.create({
-    model: config.openai.model,
+  /*const response = await openai.chat.completions.create({
+    model: config.openai.model,*/
+    const response = await deepseek.chat.completions.create({
+      model: config.deepseek.model || 'deepseek-chat',
     max_tokens: 1500,
     messages: [
       { role: 'system', content: systemPrompt },

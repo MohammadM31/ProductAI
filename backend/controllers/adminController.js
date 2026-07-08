@@ -13,7 +13,7 @@ import {
 import { getOutputsByProject, getOutputsByDepartment } from '../services/aiService.js'
 import { getDocument, indexDocument, searchDocuments, updateDocument, deleteDocument } from '../services/databaseService.js'
 import { config } from '../config/index.js'
-import OpenAI from 'openai'
+//import OpenAI from 'openai'
 import bcrypt from 'bcryptjs'
 import { v4 as uuidv4 } from 'uuid'
 import { parseGuidelinesZip } from '../services/zipParserService.js'
@@ -474,10 +474,14 @@ export async function analyzeReferenceImage(req, res) {
   }
 
   try {
-    const openai = new OpenAI({ apiKey: config.openai.apiKey })
+    const deepseek = new OpenAI({
+      apiKey: config.deepseek.apiKey,
+      baseURL: config.deepseek.baseURL || 'https://api.deepseek.com',
+    })
+      //const openai = new OpenAI({ apiKey: config.openai.apiKey })
     
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4-vision-preview',
+    const response = await deepseek.chat.completions.create({               //await openai.chat.completions.create({
+      model: config.deepseek.visionModel || 'deepseek-vl',                  //model: 'gpt-4-vision-preview',
       max_tokens: 300,
       messages: [
         {
@@ -510,7 +514,9 @@ export async function analyzeReferenceImage(req, res) {
     return res.json({ analysis })
   } catch (err) {
     console.error('Image analysis failed:', err.message)
-    return res.status(500).json({ error: 'Failed to analyze image' })
+    return res.json({ 
+      analysis: 'Reference image for style guidance. Use its colors, composition, and mood as inspiration.' 
+    })        //return res.status(500).json({ error: 'Failed to analyze image' })
   }
 }
 

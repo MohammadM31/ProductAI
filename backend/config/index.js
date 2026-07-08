@@ -13,10 +13,21 @@ export const config = {
   isDev: process.env.NODE_ENV !== 'production',
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
 
-  openai: {
+  /*openai: {
     apiKey: process.env.OPENAI_API_KEY || '',
     model: process.env.OPENAI_MODEL || 'gpt-4o',
     imageModel: process.env.OPENAI_IMAGE_MODEL || 'dall-e-2',
+  },*/
+
+  deepseek: {
+    apiKey: process.env.DEEPSEEK_API_KEY || '',
+    model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+    visionModel: process.env.DEEPSEEK_VISION_MODEL || 'deepseek-vl',
+    baseURL: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+  },
+
+  deepgram: {
+    apiKey: process.env.DEEPGRAM_API_KEY || '',
   },
 
   replicate: {
