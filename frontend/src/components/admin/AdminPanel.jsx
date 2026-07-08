@@ -380,7 +380,7 @@ const [zipUploadResult, setZipUploadResult] = useState(null)
                             }`}>
                               {project.output_type === 'image'
                                 ? <Image size={13} className="text-amber-400" />
-                                : <FileText size={13} className="text-amber-400" />
+                                : <Image size={13} className="text-amber-400" />
                               }
                             </div>
                             <div className="flex-1 min-w-0">
