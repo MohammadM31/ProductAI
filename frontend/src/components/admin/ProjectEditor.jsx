@@ -191,42 +191,6 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
             />
           </div>
 
-          {/*<div>
-            <label className="block text-xs font-medium text-stone-400 mb-1.5">Department *</label>
-            <select
-              value={form.department_id}
-              onChange={e => update('department_id', e.target.value)}
-              className="input-field"
-            >
-              <option value="">Select department…</option>
-              {departments.map(d => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </select>
-          </div>*/}
-
-          {/*<div>
-            <label className="block text-xs font-medium text-stone-400 mb-1.5">Output Type</label>
-            <div className="flex gap-2">
-              {[
-                { val: 'image', icon: Image, label: 'Image' },
-                { val: 'text', icon: FileText, label: 'Text' },
-              ].map(({ val, icon: Icon, label }) => (
-                <button
-                  key={val}
-                  onClick={() => update('output_type', val)}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm font-medium transition-all ${
-                    form.output_type === val
-                      ? 'border-amber-500 bg-amber-500/10 text-amber-400'
-                      : 'border-stone-700 text-stone-400 hover:border-stone-500'
-                  }`}
-                >
-                  <Icon size={14} />
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>*/}
         </div>
 
         <div>

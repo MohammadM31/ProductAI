@@ -21,7 +21,7 @@ const initialState = {
   // NEW: Persist input state
   textInput: '',
   inputMode: 'voice',
-  showGuidelines: true,
+  showGuidelines: false,
   panelWidth: 320,
 
   // Admin state
