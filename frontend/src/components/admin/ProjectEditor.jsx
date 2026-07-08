@@ -198,17 +198,6 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
             />
           </div>
 
-          {/* ✅ Department Display - Read Only */}
-          <div className="col-span-2">
-            <div className="bg-stone-800/50 border border-stone-700 rounded-xl px-4 py-3">
-              <p className="text-xs text-stone-400">Department</p>
-              <p className="text-sm text-white font-medium">{getDepartmentName()}</p>
-              <p className="text-xs text-stone-500 mt-1">
-                {isNew ? 'New projects are created in the default department' : 'Department is automatically assigned from the project'}
-              </p>
-            </div>
-          </div>
-
           <div className="col-span-2">
             <label className="block text-xs font-medium text-stone-400 mb-1.5">
               Image Generation Model
