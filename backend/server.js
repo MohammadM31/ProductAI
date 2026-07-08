@@ -92,11 +92,18 @@ async function start() {
   }
   
   try {
-    await initializeIndices()
-    await seedDemoData()
+    // Force a timeout of 5 seconds for OpenSearch connection
+    await Promise.race([
+      initializeIndices(),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('OpenSearch connection timeout')), 5000)
+      )
+    ]);
+    await seedDemoData();
   } catch (err) {
-    console.error('⚠️  Startup warning (continuing anyway):', err.message)
-    console.log('ℹ️  Continuing startup without OpenSearch...')
+    console.error('⚠️  OpenSearch unavailable:', err.message);
+    console.log('ℹ️  Continuing startup without OpenSearch...');
+    // Don't exit - continue to start the server
   }
 
   const PORT = process.env.PORT || config.port || 10000
