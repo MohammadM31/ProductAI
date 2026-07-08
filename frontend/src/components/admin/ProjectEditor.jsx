@@ -191,7 +191,6 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
             />
           </div>
 
-        </div>
 
         <div>
           <label className="block text-xs font-medium text-stone-400 mb-1.5">
