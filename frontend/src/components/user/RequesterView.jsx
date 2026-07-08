@@ -24,7 +24,7 @@ export default function RequesterView() {
 
   const [textInput, setTextInput] = useState(persistedTextInput || '')
   const [inputMode, setInputMode] = useState(persistedInputMode || 'voice')
-  const [showGuidelines, setShowGuidelines] = useState(persistedShowGuidelines !== undefined ? persistedShowGuidelines : true)
+  const [showGuidelines, setShowGuidelines] = useState(persistedShowGuidelines !== undefined ? persistedShowGuidelines : false)
   const [panelWidth, setPanelWidth] = useState(persistedPanelWidth || 320)
   const [mappedProject, setMappedProject] = useState(null)
   const [isMapping, setIsMapping] = useState(false)

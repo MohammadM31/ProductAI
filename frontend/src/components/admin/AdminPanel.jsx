@@ -50,7 +50,7 @@ const [zipUploadResult, setZipUploadResult] = useState(null)
     try {
       const formData = new FormData()
       formData.append('zip', file)
-      formData.append('save_to_db', 'false')
+      formData.append('save_to_db', 'true')
       
       const result = await adminApi.uploadGuidelinesZip(formData)
       setZipUploadResult(result)

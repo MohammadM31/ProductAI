@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { X, Save, Trash2, FolderOpen, Image, FileText, Plus, Upload } from 'lucide-react'
+//import { X, Save, Trash2, FolderOpen, Image, FileText, Plus, Upload } from 'lucide-react'
 import { adminApi } from '../../api/client'
 import toast from 'react-hot-toast'
 
@@ -191,7 +191,7 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
             />
           </div>
 
-          <div>
+          {/*<div>
             <label className="block text-xs font-medium text-stone-400 mb-1.5">Department *</label>
             <select
               value={form.department_id}
@@ -203,9 +203,9 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
                 <option key={d.id} value={d.id}>{d.name}</option>
               ))}
             </select>
-          </div>
+          </div>*/}
 
-          <div>
+          {/*<div>
             <label className="block text-xs font-medium text-stone-400 mb-1.5">Output Type</label>
             <div className="flex gap-2">
               {[
@@ -226,7 +226,7 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
                 </button>
               ))}
             </div>
-          </div>
+          </div>*/}
         </div>
 
         <div>

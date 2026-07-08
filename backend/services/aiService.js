@@ -426,6 +426,7 @@ async function generateTextOutput(userRequest, project) {
   const response = await openai.chat.completions.create({
     model: config.openai.model,*/
     const deepseek = getDeepSeek()
+    const systemPrompt = buildSystemPrompt(project)
 const response = await deepseek.chat.completions.create({
   model: config.deepseek.model || 'deepseek-chat',
     max_tokens: 1500,

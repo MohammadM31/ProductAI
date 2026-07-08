@@ -34,6 +34,7 @@ export const upload = multer({
   }
 })
 
+// backend/controllers/adminController.js
 export async function uploadGuidelinesZipHandler(req, res) {
   try {
     if (!req.file) {
@@ -46,9 +47,77 @@ export async function uploadGuidelinesZipHandler(req, res) {
     
     console.log(`✅ Parsed ${result.projects.length} projects from ZIP`)
     
+    // Check if we should save to database
+    const saveToDb = req.body.save_to_db === 'true'
+    let savedProjects = []
+    
+    if (saveToDb) {
+      console.log('💾 Saving projects to database...')
+      
+      // Get or create department
+      const departmentName = result.department || 'Marketing Department'
+      const departments = await getAllDepartments()
+      let department = departments.find(d => d.name.toLowerCase() === departmentName.toLowerCase())
+      
+      if (!department) {
+        // Create the department
+        const deptId = uuidv4()
+        department = {
+          id: deptId,
+          name: departmentName,
+          description: `Department for ${departmentName} projects`,
+          created_at: new Date().toISOString()
+        }
+        await indexDocument(config.indices.departments, deptId, department)
+        console.log(`✅ Created department: ${departmentName}`)
+      }
+      
+      // Save each project
+      for (const projectData of result.projects) {
+        const projectId = uuidv4()
+        const now = new Date().toISOString()
+        
+        const project = {
+          id: projectId,
+          name: projectData.name || 'Unnamed Project',
+          description: projectData.description || '',
+          department_id: department.id,
+          output_type: 'image',
+          trigger_keywords: projectData.name?.toLowerCase().replace(/\s+/g, ' ') || '',
+          system_prompt: projectData.system_prompt || '',
+          reference_criteria: projectData.reference_criteria || '',
+          reference_images: (projectData.reference_images || []).map(img => ({
+            id: img.id || uuidv4(),
+            name: img.name || 'reference.jpg',
+            url: img.url || '',
+            description: img.description || '',
+            style_analysis: img.style_analysis || img.description || ''
+          })),
+          attached_files: (projectData.attached_files || []).map(file => ({
+            id: file.id || uuidv4(),
+            name: file.name || 'file.txt',
+            type: file.type || 'text/plain',
+            content: file.content || ''
+          })),
+          image_model: 'flux-schnell',
+          created_by: req.user?.id || 'system',
+          created_at: now,
+          updated_at: now,
+        }
+        
+        await indexDocument(config.indices.projects, projectId, project)
+        savedProjects.push(project)
+        console.log(`✅ Created project: ${project.name}`)
+      }
+      
+      console.log(`✅ Saved ${savedProjects.length} projects to department: ${department.name}`)
+    }
+    
     return res.json({
-      message: 'ZIP parsed successfully',
-      data: result
+      message: saveToDb ? `ZIP parsed and ${savedProjects.length} projects saved` : 'ZIP parsed successfully (preview mode)',
+      data: result,
+      saved: saveToDb ? savedProjects : [],
+      department: saveToDb ? result.department : null
     })
     
   } catch (err) {
@@ -56,7 +125,6 @@ export async function uploadGuidelinesZipHandler(req, res) {
     return res.status(500).json({ error: err.message })
   }
 }
-
 
 
 export async function listProjects(req, res) {
