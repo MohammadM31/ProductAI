@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-//import { X, Save, Trash2, FolderOpen, Image, FileText, Plus, Upload } from 'lucide-react'
+import { X, Save, Trash2, FolderOpen, Plus, Upload } from 'lucide-react'  // ✅ Added X
 import { adminApi } from '../../api/client'
 import toast from 'react-hot-toast'
 
@@ -131,6 +131,13 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
     }))
   }
 
+  // ✅ Get department name for display
+  const getDepartmentName = () => {
+    if (!form.department_id) return 'No department'
+    const dept = departments.find(d => d.id === form.department_id)
+    return dept ? dept.name : 'Unknown department'
+  }
+
   const handleSave = async () => {
     if (!form.name.trim() || !form.department_id) {
       toast.error('Name and department are required')
@@ -191,24 +198,35 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
             />
           </div>
 
+          {/* ✅ Department Display - Read Only */}
+          <div className="col-span-2">
+            <div className="bg-stone-800/50 border border-stone-700 rounded-xl px-4 py-3">
+              <p className="text-xs text-stone-400">Department</p>
+              <p className="text-sm text-white font-medium">{getDepartmentName()}</p>
+              <p className="text-xs text-stone-500 mt-1">
+                {isNew ? 'New projects are created in the default department' : 'Department is automatically assigned from the project'}
+              </p>
+            </div>
+          </div>
 
-        <div>
-          <label className="block text-xs font-medium text-stone-400 mb-1.5">
-            Image Generation Model
-            <span className="text-stone-600 font-normal ml-1">— Choose which AI model to use</span>
-          </label>
-          <select
-            value={form.image_model || 'flux-schnell'}
-            onChange={e => update('image_model', e.target.value)}
-            className="input-field"
-          >
-            <option value="flux-schnell">FLUX-Schnell (Cheapest, $0.003/image)</option>
-            <option value="flux-dev">FLUX-Dev (Good quality, $0.025/image)</option>
-            <option value="flux-1.1-pro">FLUX-1.1-Pro (Best quality, $0.04/image)</option>
-            <option value="sdxl">SDXL (Open source, ~$0.003-0.005/image)</option>
-            <option value="ideogram-v3-turbo">Ideogram v3 Turbo (Good for text, ~$0.04/image)</option>
-          </select>
-          <p className="text-xs text-stone-500 mt-1">Different models have different costs and quality levels</p>
+          <div className="col-span-2">
+            <label className="block text-xs font-medium text-stone-400 mb-1.5">
+              Image Generation Model
+              <span className="text-stone-600 font-normal ml-1">— Choose which AI model to use</span>
+            </label>
+            <select
+              value={form.image_model || 'flux-schnell'}
+              onChange={e => update('image_model', e.target.value)}
+              className="input-field"
+            >
+              <option value="flux-schnell">FLUX-Schnell (Cheapest, $0.003/image)</option>
+              <option value="flux-dev">FLUX-Dev (Good quality, $0.025/image)</option>
+              <option value="flux-1.1-pro">FLUX-1.1-Pro (Best quality, $0.04/image)</option>
+              <option value="sdxl">SDXL (Open source, ~$0.003-0.005/image)</option>
+              <option value="ideogram-v3-turbo">Ideogram v3 Turbo (Good for text, ~$0.04/image)</option>
+            </select>
+            <p className="text-xs text-stone-500 mt-1">Different models have different costs and quality levels</p>
+          </div>
         </div>
 
         <div className="border border-stone-700 rounded-xl p-4 bg-stone-900/50">
