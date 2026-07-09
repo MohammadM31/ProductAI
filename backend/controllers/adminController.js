@@ -10,10 +10,10 @@ import {
   updateDepartment,
   deleteDepartment,
 } from '../services/projectService.js'
-import { getOutputsByProject, getOutputsByDepartment } from '../services/aiService.js'
+import { getOutputsByProject, getOutputsByDepartment, getAllOutputs } from '../services/aiService.js'
 import { getDocument, indexDocument, searchDocuments, updateDocument, deleteDocument } from '../services/databaseService.js'
 import { config } from '../config/index.js'
-//import OpenAI from 'openai'
+import OpenAI from 'openai'
 import bcrypt from 'bcryptjs'
 import { v4 as uuidv4 } from 'uuid'
 import { parseGuidelinesZip } from '../services/zipParserService.js'
@@ -40,90 +40,162 @@ export async function uploadGuidelinesZipHandler(req, res) {
     if (!req.file) {
       return res.status(400).json({ error: 'No ZIP file provided' })
     }
-    
+
     console.log('📦 Processing ZIP file:', req.file.originalname)
-    
+
     const result = await parseGuidelinesZip(req.file.buffer)
-    
-    console.log(`✅ Parsed ${result.projects.length} projects from ZIP`)
-    
-    // Check if we should save to database
+
+    console.log(`✅ Parsed ${result.projects.length} folder group(s) from ZIP`)
+
     const saveToDb = req.body.save_to_db === 'true'
-    let savedProjects = []
-    
+    let createdProjects = []
+    let updatedProjects = []
+
     if (saveToDb) {
-      console.log('💾 Saving projects to database...')
-      
-      // Get or create department
-      const departmentName = result.department || 'Marketing Department'
-      const departments = await getAllDepartments()
-      let department = departments.find(d => d.name.toLowerCase() === departmentName.toLowerCase())
-      
-      if (!department) {
-        // Create the department
-        const deptId = uuidv4()
-        department = {
-          id: deptId,
-          name: departmentName,
-          description: `Department for ${departmentName} projects`,
-          created_at: new Date().toISOString()
+      console.log('💾 Matching parsed content to departments/projects...')
+
+      let allDepartments = await getAllDepartments()
+      let allProjects = await getAllProjects()
+
+      for (const parsed of result.projects) {
+        // ------------------------------------------------------
+        // 1. Resolve department (fuzzy match by name, else create)
+        // ------------------------------------------------------
+        let department = findByFuzzyName(allDepartments, parsed.department)
+        if (!department) {
+          const deptId = uuidv4()
+          department = {
+            id: deptId,
+            name: parsed.department,
+            description: `Department for ${parsed.department}`,
+            created_at: new Date().toISOString(),
+          }
+          await indexDocument(config.indices.departments, deptId, department)
+          allDepartments.push(department)
+          console.log(`✅ Created department: "${department.name}"`)
         }
-        await indexDocument(config.indices.departments, deptId, department)
-        console.log(`✅ Created department: ${departmentName}`)
-      }
-      
-      // Save each project
-      for (const projectData of result.projects) {
-        const projectId = uuidv4()
-        const now = new Date().toISOString()
-        
-        const project = {
-          id: projectId,
-          name: projectData.name || 'Unnamed Project',
-          description: projectData.description || '',
-          department_id: department.id,
-          output_type: 'image',
-          trigger_keywords: projectData.name?.toLowerCase().replace(/\s+/g, ' ') || '',
-          system_prompt: projectData.system_prompt || '',
-          reference_criteria: projectData.reference_criteria || '',
-          reference_images: (projectData.reference_images || []).map(img => ({
-            id: img.id || uuidv4(),
-            name: img.name || 'reference.jpg',
-            url: img.url || '',
-            description: img.description || '',
-            style_analysis: img.style_analysis || img.description || ''
-          })),
-          attached_files: (projectData.attached_files || []).map(file => ({
-            id: file.id || uuidv4(),
-            name: file.name || 'file.txt',
-            type: file.type || 'text/plain',
-            content: file.content || ''
-          })),
-          image_model: 'flux-schnell',
-          created_by: req.user?.id || 'system',
-          created_at: now,
-          updated_at: now,
+
+        // ------------------------------------------------------
+        // 2. Resolve project within that department (fuzzy match
+        //    by folder name, e.g. "Menu Item" -> "Menu Item Images",
+        //    "Instagram Posts" -> "Instagram Posts")
+        // ------------------------------------------------------
+        const deptProjects = allProjects.filter(p => p.department_id === department.id)
+        let project = findByFuzzyName(deptProjects, parsed.requestType)
+
+        const categoryTag = (parsed.category || 'general').toLowerCase()
+        const taggedImages = (parsed.reference_images || []).map(img => ({
+          ...img,
+          category: categoryTag,
+        }))
+        const taggedFiles = parsed.attached_files || []
+
+        if (project) {
+          // ---- Merge into existing project ----
+          const mergedReferenceImages = [...(project.reference_images || []), ...taggedImages]
+          const mergedAttachedFiles = [...(project.attached_files || []), ...taggedFiles]
+          const mergedCriteria = parsed.reference_criteria
+            ? `${project.reference_criteria || ''}${project.reference_criteria ? '\n\n' : ''}${parsed.reference_criteria}`
+            : project.reference_criteria
+
+          const updated = await updateProject(project.id, {
+            ...project,
+            reference_images: mergedReferenceImages,
+            attached_files: mergedAttachedFiles,
+            reference_criteria: mergedCriteria,
+            output_type: 'image', // this platform is image-generation only
+          })
+
+          updatedProjects.push(updated)
+          const idx = allProjects.findIndex(p => p.id === project.id)
+          allProjects[idx] = updated
+          console.log(`🔄 Merged "${categoryTag}" content into existing project: "${project.name}" (${department.name})`)
+        } else {
+          // ---- Create new project ----
+          const projectId = uuidv4()
+          const now = new Date().toISOString()
+
+          const newProject = {
+            id: projectId,
+            name: parsed.requestType || parsed.name || 'Unnamed Project',
+            description: parsed.description || `${parsed.requestType} projects`,
+            department_id: department.id,
+            output_type: 'image', // this platform is image-generation only
+            trigger_keywords: (parsed.requestType || '').toLowerCase(),
+            system_prompt: parsed.system_prompt || '',
+            reference_criteria: parsed.reference_criteria || '',
+            reference_images: taggedImages,
+            attached_files: taggedFiles,
+            image_model: 'flux-schnell',
+            created_by: req.user?.id || 'system',
+            created_at: now,
+            updated_at: now,
+          }
+
+          await indexDocument(config.indices.projects, projectId, newProject)
+          allProjects.push(newProject)
+          createdProjects.push(newProject)
+          console.log(`✅ Created project: "${newProject.name}" (${department.name})`)
         }
-        
-        await indexDocument(config.indices.projects, projectId, project)
-        savedProjects.push(project)
-        console.log(`✅ Created project: ${project.name}`)
       }
-      
-      console.log(`✅ Saved ${savedProjects.length} projects to department: ${department.name}`)
+
+      console.log(`✅ ZIP import complete: ${createdProjects.length} created, ${updatedProjects.length} updated`)
     }
-    
+
     return res.json({
-      message: saveToDb ? `ZIP parsed and ${savedProjects.length} projects saved` : 'ZIP parsed successfully (preview mode)',
+      message: saveToDb
+        ? `ZIP parsed: ${createdProjects.length} project(s) created, ${updatedProjects.length} project(s) updated`
+        : 'ZIP parsed successfully (preview mode)',
       data: result,
-      saved: saveToDb ? savedProjects : [],
-      department: saveToDb ? result.department : null
+      created: saveToDb ? createdProjects : [],
+      updated: saveToDb ? updatedProjects : [],
     })
-    
+
   } catch (err) {
     console.error('ZIP parsing error:', err)
     return res.status(500).json({ error: err.message })
   }
+}
+
+// ============================================================
+// Fuzzy name matching helpers
+// Used to match ZIP folder names ("Menu Item", "Instagram Posts")
+// to existing department/project names ("Menu Item Images", "Instagram Posts")
+// ============================================================
+function normalizeName(str) {
+  return (str || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function findByFuzzyName(list, targetName) {
+  const target = normalizeName(targetName)
+  if (!target) return null
+
+  // 1. Exact normalized match
+  let match = list.find(item => normalizeName(item.name) === target)
+  if (match) return match
+
+  // 2. Substring match in either direction
+  //    e.g. "menu item" matches "Menu Item Images"
+  match = list.find(item => {
+    const itemName = normalizeName(item.name)
+    return itemName.includes(target) || target.includes(itemName)
+  })
+  if (match) return match
+
+  // 3. Word-overlap match
+  //    e.g. "instagram posts" folder matches "Instagram Posts" project
+  const targetWords = new Set(target.split(' ').filter(w => w.length > 2))
+  let best = null
+  let bestScore = 0
+  for (const item of list) {
+    const itemWords = normalizeName(item.name).split(' ').filter(w => w.length > 2)
+    const overlap = itemWords.filter(w => targetWords.has(w)).length
+    if (overlap > bestScore) {
+      bestScore = overlap
+      best = item
+    }
+  }
+  return bestScore > 0 ? best : null
 }
 
 
@@ -509,7 +581,8 @@ export async function listOutputs(req, res) {
       if (projectId) {
         outputs = await getOutputsByProject(projectId)
       } else if (role === 'admin') {
-        outputs = await getOutputsByDepartment(undefined)
+        // Admin sees every request across every department
+        outputs = await getAllOutputs()
       } else {
         if (!department_id) {
           return res.status(400).json({ error: 'Department user has no department assigned' })
@@ -546,7 +619,6 @@ export async function analyzeReferenceImage(req, res) {
       apiKey: config.deepseek.apiKey,
       baseURL: config.deepseek.baseURL || 'https://api.deepseek.com',
     })
-      //const openai = new OpenAI({ apiKey: config.openai.apiKey })
     
     const response = await deepseek.chat.completions.create({               //await openai.chat.completions.create({
       model: config.deepseek.visionModel || 'deepseek-vl',                  //model: 'gpt-4-vision-preview',

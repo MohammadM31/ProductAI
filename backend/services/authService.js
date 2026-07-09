@@ -171,7 +171,7 @@ Output a single, optimised DALL-E image generation prompt. No extra text.`,
     name: 'Business Reports',
     description: 'Generate business reports and corporate documents.',
     department_id: businessDeptId,
-    output_type: 'text',
+    output_type: 'image',
     trigger_keywords: 'report business corporate document analysis summary presentation',
     system_prompt: `You are a business analyst creating professional reports.
 

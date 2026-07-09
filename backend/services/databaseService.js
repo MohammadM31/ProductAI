@@ -63,6 +63,7 @@ const PROJECT_MAPPING = {
           url: { type: 'keyword' },
           description: { type: 'text' },
           style_analysis: { type: 'text' },
+          category: { type: 'keyword' },
         }
       },
       attached_files: {

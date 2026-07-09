@@ -22,6 +22,7 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
   const [deleting, setDeleting] = useState(false)
   const [uploadingImage, setUploadingImage] = useState(false)
   const [uploadingFile, setUploadingFile] = useState(false)
+  const [pendingCategory, setPendingCategory] = useState('general')
   const isNew = !project?.id
 
   useEffect(() => {
@@ -70,6 +71,7 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
           url: base64,
           description: file.name,
           style_analysis: analysis,
+          category: pendingCategory || 'general',
         }
         
         setForm(f => ({
@@ -236,6 +238,13 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
                 className="hidden"
               />
             </label>
+            <input
+              value={pendingCategory}
+              onChange={e => setPendingCategory(e.target.value)}
+              className="input-field w-40 text-sm"
+              placeholder="category e.g. cold"
+              title="Category tag applied to the next uploaded image (e.g. cold, hot, food)"
+            />
             <p className="text-xs text-stone-500">PNG, JPG, WebP (max 5MB)</p>
           </div>
 
@@ -254,6 +263,17 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
                   <X size={12} />
                 </button>
                 <p className="text-xs text-stone-400 mt-1 truncate">{img.name}</p>
+                <input
+                  value={img.category || 'general'}
+                  onChange={e => setForm(f => ({
+                    ...f,
+                    reference_images: f.reference_images.map(i =>
+                      i.id === img.id ? { ...i, category: e.target.value } : i
+                    )
+                  }))}
+                  className="input-field text-xs mt-1 py-1"
+                  placeholder="category"
+                />
               </div>
             ))}
           </div>

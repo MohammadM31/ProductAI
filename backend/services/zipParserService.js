@@ -96,6 +96,14 @@ async function extractAndProcessFiles(tree, entries) {
                 type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                 content: textContent
               })
+
+              // If the file name signals it's a style/brand guideline, also feed
+              // it directly into reference_criteria so it's used as generation
+              // guidance, not just kept as a passive attachment.
+              if (/guideline|guidance|style|brand/i.test(fileInfo.name)) {
+                project.reference_criteria += (project.reference_criteria ? '\n\n' : '') +
+                  `[From ${fileInfo.name}]\n${textContent}`
+              }
             }
           } catch (err) {
             console.warn(`Failed to process ${fileInfo.name}:`, err.message)

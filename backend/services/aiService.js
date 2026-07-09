@@ -246,12 +246,51 @@ function buildSystemPrompt(project) {
 
 // ============================================================
 // Generate Output
+// This platform generates images only — every project, regardless
+// of its stored output_type, produces an image.
 // ============================================================
 export async function generateOutput(userRequest, project) {
-  if (project.output_type === 'image') {
-    return generateImageOutput(userRequest, project)
+  return generateImageOutput(userRequest, project)
+}
+
+// ============================================================
+// NEW: Detect which reference-image category a request belongs to
+// ============================================================
+async function detectImageCategory(userRequest, availableCategories) {
+  if (availableCategories.length <= 1) {
+    return availableCategories[0] || null
   }
-  return generateTextOutput(userRequest, project)
+
+  const deepseek = getDeepSeek()
+  try {
+    const resp = await deepseek.chat.completions.create({
+      model: config.deepseek.model || 'deepseek-chat',
+      max_tokens: 20,
+      temperature: 0,
+      messages: [
+        {
+          role: 'system',
+          content: `Classify the user's request into exactly one of these categories: ${availableCategories.join(', ')}. Reply with ONLY the category name, nothing else.`,
+        },
+        { role: 'user', content: userRequest },
+      ],
+    })
+    const category = resp.choices[0].message.content.trim().toLowerCase()
+    if (availableCategories.includes(category)) {
+      console.log(`🏷️ Detected category: "${category}"`)
+      return category
+    }
+  } catch (err) {
+    console.warn('⚠️ Category detection failed:', err.message)
+  }
+
+  // Fallback: simple keyword match
+  const lower = userRequest.toLowerCase()
+  const coldWords = ['iced', 'ice', 'cold', 'frozen', 'chilled']
+  const hotWords = ['hot', 'warm', 'steaming']
+  if (coldWords.some(w => lower.includes(w)) && availableCategories.includes('cold')) return 'cold'
+  if (hotWords.some(w => lower.includes(w)) && availableCategories.includes('hot')) return 'hot'
+  return availableCategories[0]
 }
 
 // ============================================================
@@ -263,57 +302,55 @@ async function generateImageOutput(userRequest, project) {
 
   let referenceImageUrl = null
   let imageDescription = ''
-  
-  // Get reference image and analyze it dynamically
+  let matchedImages = []
+
+  // Get reference images for the matching category and analyze them dynamically
   if (project.reference_images && project.reference_images.length > 0) {
-    const firstImage = project.reference_images[0]
-    referenceImageUrl = firstImage.url
-    
-    try {
-      console.log('🖼️ Analyzing reference image dynamically...')
-      
-      // Use GPT-4 Vision to understand the image with timeout
-      /*const analysis = await Promise.race([
-        openai.chat.completions.create({
-          model: 'gpt-4o',*/
-          const analysis = await Promise.race([
-            deepseek.chat.completions.create({
-              model: config.deepseek.model || 'deepseek-chat',
-          max_tokens: 300,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: `Describe this image in detail. List:
-                  1. The cup: shape, color, material, any text or design on it
-                  2. The drink: color, texture
-                  3. The background: what's in it
-                  4. The lighting: warm/cool, soft/harsh
-                  5. The composition: angle, position
-                  
-                  Be specific but concise.`
-                },
-                {
-                  type: 'image_url',
-                  image_url: { url: referenceImageUrl, detail: 'low' }
-                }
-              ]
-            }
-          ]
-        }),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Analysis timeout')), 10000)
+    const categories = [...new Set(
+      project.reference_images.map(img => (img.category || 'general').toLowerCase())
+    )]
+
+    const targetCategory = await detectImageCategory(userRequest, categories)
+
+    matchedImages = targetCategory
+      ? project.reference_images.filter(
+          img => (img.category || 'general').toLowerCase() === targetCategory
         )
-      ])
-      
-      imageDescription = await analyzeImageWithDeepSeek(referenceImageUrl)  //imageDescription = analysis.choices[0].message.content
-      console.log('📸 Reference image understood:', imageDescription.substring(0, 150) + '...')
-      
+      : project.reference_images
+
+    if (matchedImages.length === 0) {
+      matchedImages = project.reference_images
+    }
+
+    // Use the first matched image as the actual img2img input
+    referenceImageUrl = matchedImages[0].url
+
+    try {
+      console.log(`🖼️ Analyzing ${matchedImages.length} reference image(s) for category "${targetCategory}"...`)
+
+      const descriptions = await Promise.all(
+        matchedImages.map(img =>
+          Promise.race([
+            analyzeImageWithDeepSeek(img.url),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Analysis timeout')), 10000)
+            ),
+          ]).catch(err => {
+            console.warn(`⚠️ Analysis failed for ${img.name}:`, err.message)
+            return 'Reference image provided. Match its style, colors, and composition.'
+          })
+        )
+      )
+
+      imageDescription = descriptions
+        .map((desc, i) => `Reference ${i + 1} (${matchedImages[i].name}): ${desc}`)
+        .join('\n\n')
+
+      console.log('📸 Combined reference understanding:', imageDescription.substring(0, 150) + '...')
+
     } catch (err) {
       console.warn('⚠️ Image analysis failed:', err.message)
-      imageDescription = 'Reference image provided. Match its style, colors, and composition.'
+      imageDescription = 'Reference images provided. Match their style, colors, and composition.'
     }
   }
 
@@ -480,35 +517,11 @@ async function analyzeImageWithDeepSeek(imageData) {
 
 // ============================================================
 // Iterate Output (revision)
+// This platform generates images only — iteration always re-renders
+// an image based on the accumulated feedback.
 // ============================================================
 export async function iterateOutput(originalRequest, feedback, previousContent, project) {
-  if (project.output_type === 'image') {
-    return generateImageOutput(`${originalRequest}. Modifications requested: ${feedback}`, project)
-  }
-
-  const deepseek = getDeepSeek()//const openai = getOpenAI()
-  const systemPrompt = buildSystemPrompt(project)
-
-  /*const response = await openai.chat.completions.create({
-    model: config.openai.model,*/
-    const response = await deepseek.chat.completions.create({
-      model: config.deepseek.model || 'deepseek-chat',
-    max_tokens: 1500,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: originalRequest },
-      { role: 'assistant', content: previousContent },
-      {
-        role: 'user',
-        content: `Please revise based on this feedback: ${feedback}`,
-      },
-    ],
-  })
-
-  return {
-    output_type: 'text',
-    content: response.choices[0].message.content,
-  }
+  return generateImageOutput(`${originalRequest}. Modifications requested: ${feedback}`, project)
 }
 
 // ============================================================
@@ -539,6 +552,17 @@ export async function saveOutput({ sessionId, projectId, departmentId, outputTyp
   })
   await indexDocument(config.indices.outputs, id, doc)
   return doc
+}
+
+// ============================================================
+// Get All Outputs (Admin Inbox — every request, every department)
+// ============================================================
+export async function getAllOutputs() {
+  return searchDocuments(config.indices.outputs, {
+    query: { match_all: {} },
+    sort: [{ created_at: { order: 'desc' } }],
+    size: 200,
+  })
 }
 
 // ============================================================
