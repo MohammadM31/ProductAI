@@ -10,8 +10,8 @@ export function getClient() {
     client = new Client({
       node,
       auth: { username, password },
-      ssl: useSsl ? { ca: caCert, rejectUnauthorized: !!caCert } : undefined,
-      requestTimeout: 30000,
+      ssl: useSsl ? { ca: caCert, rejectUnauthorized: false/*!!caCert*/ } : undefined,
+      requestTimeout: 60000,
     })
   }
   return client
