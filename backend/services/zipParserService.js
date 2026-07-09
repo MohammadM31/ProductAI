@@ -61,10 +61,13 @@ async function extractAndProcessFiles(tree, entries) {
   function traverse(node, path = []) {
     // If we have files and we're at a leaf node
     if (node.files && node.files.length > 0 && Object.keys(node.children).length === 0) {
-      // This is a category folder
+      // Category and requestType are always counted from the bottom
+      // (closest to the files). Department is always the top-level
+      // folder, regardless of how many organizational folders sit
+      // in between (e.g. "business/request types/business report/annual report/").
       const categoryName = path[path.length - 1] || 'Uncategorized'
       const requestType = path[path.length - 2] || 'General'
-      const department = path[path.length - 3] || 'Marketing Department'
+      const department = path[0] || 'Marketing Department'
       
       const project = {
         name: `${requestType} - ${categoryName}`,
