@@ -15,6 +15,12 @@ services:
         value: 10000
       - key: OPENAI_API_KEY
         sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_MODEL
+        value: deepseek-chat
+      - key: DEEPSEEK_VISION_MODEL
+        value: deepseek-vl
       - key: REPLICATE_API_KEY
         sync: false
       - key: OPENSEARCH_HOST

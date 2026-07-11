@@ -1,406 +1,337 @@
-import React, { useState, useEffect } from 'react'
-import { X, Save, Trash2, FolderOpen, Plus, Upload } from 'lucide-react'  // ✅ Added X
-import { adminApi } from '../../api/client'
-import toast from 'react-hot-toast'
+import Replicate from 'replicate'
+import { config } from '../config/index.js'
+import axios from 'axios'
+import fs from 'fs'
+import path from 'path'
+import { v4 as uuidv4 } from 'uuid'
+import { fileURLToPath } from 'url'
 
-const EMPTY_PROJECT = {
-  name: '',
-  description: '',
-  department_id: '',
-  output_type: 'image',
-  trigger_keywords: '',
-  system_prompt: '',
-  reference_criteria: '',
-  reference_images: [],
-  attached_files: [],
-  image_model: 'flux-schnell',
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+let replicateClient = null
+
+function getReplicate() {
+  if (!replicateClient) {
+    replicateClient = new Replicate({
+      auth: config.replicate.apiKey,
+    })
+  }
+  return replicateClient
 }
 
-export default function ProjectEditor({ project, departments, onSave, onDelete, onClose }) {
-  const [form, setForm] = useState(EMPTY_PROJECT)
-  const [saving, setSaving] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [uploadingImage, setUploadingImage] = useState(false)
-  const [uploadingFile, setUploadingFile] = useState(false)
-  const [pendingCategory, setPendingCategory] = useState('general')
-  const isNew = !project?.id
-
-  useEffect(() => {
-    if (project) {
-      setForm({
-        name: project.name || '',
-        description: project.description || '',
-        department_id: project.department_id || '',
-        output_type: project.output_type || 'image',
-        trigger_keywords: project.trigger_keywords || '',
-        system_prompt: project.system_prompt || '',
-        reference_criteria: project.reference_criteria || '',
-        reference_images: Array.isArray(project.reference_images) ? project.reference_images : [],
-        attached_files: Array.isArray(project.attached_files) ? project.attached_files : [],
-        image_model: project.image_model || 'flux-schnell',
-      })
-    }
-  }, [project])
-
-  const update = (key, val) => setForm(f => ({ ...f, [key]: val }))
-
-  const analyzeImage = async (imageBase64) => {
-    try {
-      const response = await adminApi.analyzeImage(imageBase64)
-      return response.analysis || ''
-    } catch (err) {
-      console.error('Image analysis failed:', err)
-      return ''
-    }
-  }
-
-  const handleImageUpload = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
+// Function to download and save image locally
+async function downloadAndSaveImage(imageUrl, extension = 'png') {
+  try {
+    console.log('📥 Downloading image from:', imageUrl.substring(0, 80) + '...')
     
-    setUploadingImage(true)
-    try {
-      const reader = new FileReader()
-      reader.onloadend = async () => {
-        const base64 = reader.result
-        const analysis = await analyzeImage(base64)
-        
-        const newImage = {
-          id: Date.now().toString(),
-          name: file.name,
-          url: base64,
-          description: file.name,
-          style_analysis: analysis,
-          category: pendingCategory || 'general',
-        }
-        
-        setForm(f => ({
-          ...f,
-          reference_images: [...f.reference_images, newImage]
-        }))
-        toast.success('Reference image uploaded and analyzed')
-      }
-      reader.readAsDataURL(file)
-    } catch (err) {
-      toast.error('Failed to upload image')
-    } finally {
-      setUploadingImage(false)
+    const uploadDir = path.join(__dirname, '..', 'uploads', 'images')
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true })
     }
-  }
 
-  const removeImage = (imageId) => {
-    setForm(f => ({
-      ...f,
-      reference_images: f.reference_images.filter(img => img.id !== imageId)
-    }))
-  }
+    let response = null
+    let attempts = 0
+    while (attempts < 3 && !response) {
+      try {
+        response = await axios({
+          method: 'GET',
+          url: imageUrl,
+          responseType: 'arraybuffer',
+          timeout: 30000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          },
+        })
+      } catch (err) {
+        attempts++
+        console.log(`⚠️ Download attempt ${attempts} failed:`, err.message)
+        if (attempts < 3) {
+          await new Promise(resolve => setTimeout(resolve, 2000))
+        } else {
+          throw err
+        }
+      }
+    }
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
+    const filename = `${uuidv4()}.${extension}`
+    const filepath = path.join(uploadDir, filename)
+    fs.writeFileSync(filepath, response.data)
+    console.log('✅ Image saved locally:', filename)
+
+    return `/uploads/images/${filename}`
+  } catch (err) {
+    console.error('❌ Failed to download image:', err.message)
+    return imageUrl
+  }
+}
+
+const MODEL_CONFIGS = {
+  'flux-schnell': {
+    version: 'black-forest-labs/flux-schnell',
+    input: {
+      prompt: '',
+      go_fast: true,
+      num_outputs: 1,
+      aspect_ratio: '1:1',
+      output_format: 'png',
+    }
+  },
+  'flux-dev': {
+    version: 'black-forest-labs/flux-dev',
+    input: {
+      prompt: '',
+      num_outputs: 1,
+      aspect_ratio: '1:1',
+      output_format: 'png',
+    }
+  },
+  'flux-1.1-pro': {
+    version: 'black-forest-labs/flux-1.1-pro',
+    input: {
+      prompt: '',
+      num_outputs: 1,
+      aspect_ratio: '1:1',
+      output_format: 'png',
+    }
+  },
+  'sdxl': {
+    version: 'stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b',
+    input: {
+      prompt: '',
+      width: 1024,
+      height: 1024,
+      num_outputs: 1,
+      scheduler: 'K_EULER',
+      num_inference_steps: 25,
+      guidance_scale: 7.5,
+    }
+  },
+  // Recraft V4 — design-first raster model. Stronger prompt accuracy, text
+  // rendering, and art-directed composition than Flux for branded/marketing
+  // work. Released Feb 2026.
+  'recraft-v4': {
+    version: 'recraft-ai/recraft-v4',
+    input: {
+      prompt: '',
+      aspect_ratio: '1:1',
+    },
+    outputExtension: 'png',
+  },
+  // Recraft V4 SVG — the only current model that outputs TRUE native vector
+  // paths (not a traced raster). Opens directly in Illustrator/Figma with
+  // structured, editable layers. Use for logos, icons, and vector assets.
+  'recraft-v4-svg': {
+    version: 'recraft-ai/recraft-v4-svg',
+    input: {
+      prompt: '',
+      aspect_ratio: '1:1',
+    },
+    outputExtension: 'svg',
+  },
+}
+
+// ============================================================
+// Main generation function with image-to-image support
+// ============================================================
+export async function generateImageWithReplicate(prompt, modelName = 'flux-schnell', referenceImage = null) {
+  const replicate = getReplicate()
+  
+  const configModel = MODEL_CONFIGS[modelName] || MODEL_CONFIGS['flux-schnell']
+  
+  const input = { ...configModel.input }
+  input.prompt = prompt
+  
+  // Detect if this is a modification request
+  const isModification = prompt.includes('instead of') || 
+                         prompt.includes('change') || 
+                         prompt.includes('remove') ||
+                         prompt.includes('without')
+  
+  if (referenceImage) {
+    console.log('🖼️ Using reference image for image generation')
     
-    setUploadingFile(true)
-    try {
-      const reader = new FileReader()
-      reader.onloadend = () => {
-        const content = reader.result
-        
-        const newFile = {
-          id: Date.now().toString(),
-          name: file.name,
-          type: file.type,
-          content: content,
-        }
-        
-        setForm(f => ({
-          ...f,
-          attached_files: [...f.attached_files, newFile]
-        }))
-        toast.success('File uploaded')
-      }
-      reader.readAsDataURL(file)
-    } catch (err) {
-      toast.error('Failed to upload file')
-    } finally {
-      setUploadingFile(false)
-    }
-  }
-
-  const removeFile = (fileId) => {
-    setForm(f => ({
-      ...f,
-      attached_files: f.attached_files.filter(file => file.id !== fileId)
-    }))
-  }
-
-  // ✅ Get department name for display
-  const getDepartmentName = () => {
-    if (!form.department_id) return 'No department'
-    const dept = departments.find(d => d.id === form.department_id)
-    return dept ? dept.name : 'Unknown department'
-  }
-
-  const handleSave = async () => {
-    if (!form.name.trim() || !form.department_id) {
-      toast.error('Name and department are required')
-      return
-    }
-    setSaving(true)
-    try {
-      let result
-      if (isNew) {
-        result = await adminApi.createProject(form)
-        toast.success('Project created')
+    if (modelName.startsWith('flux')) {
+      input.image = referenceImage
+      // Replicate's Flux img2img field is `prompt_strength`, NOT `strength`.
+      // Scale is 0 = keep the reference image as-is, 1 = ignore it completely.
+      // So LOWER values keep us close to the reference; higher values let the
+      // prompt override more of it. (Previously this used the wrong field name
+      // AND the wrong direction, which is why generations drifted away from
+      // the reference cup design instead of preserving it.)
+      if (isModification) {
+        input.prompt_strength = 0.5
+        console.log('   Modification mode: prompt_strength 0.5 (apply the requested change, keep the rest close to reference)')
       } else {
-        result = await adminApi.updateProject(project.id, form)
-        toast.success('Project saved')
+        input.prompt_strength = 0.25
+        console.log('   Replication mode: prompt_strength 0.25 (stay close to reference design)')
       }
-      onSave(result.project)
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Save failed')
-    } finally {
-      setSaving(false)
+      input.guidance_scale = 3.5
+    }
+    
+    if (modelName === 'sdxl') {
+      input.image = referenceImage
+      input.denoising_strength = isModification ? 0.5 : 0.3
+    }
+
+    if (modelName.startsWith('recraft')) {
+      // Recraft locks a product's exact look via a separate "custom style"
+      // API step (upload references → get a style_id → pass it into
+      // generation), not a direct img2img `image` field like Flux/SDXL.
+      // That style-creation step isn't wired up yet, so for now the
+      // reference image only informs the text prompt (via the vision
+      // description built upstream in aiService.js), not literal pixel
+      // preservation. Flag this so it's not silently ignored.
+      console.warn('⚠️ Recraft models don\'t support direct img2img reference locking yet (needs Recraft custom-style API). Reference is being used as a text description only — for exact product/logo preservation, use a flux-* model.')
     }
   }
+  
+  try {
+    console.log(`🎨 Generating with ${modelName}${referenceImage ? ' (with reference image)' : ''}...`)
+    
+    const prediction = await replicate.predictions.create({
+      version: configModel.version,
+      input: input,
+    })
+    
+    console.log('📊 Prediction ID:', prediction.id)
+    
+    let result = prediction
+    let attempts = 0
+    const maxAttempts = 60
+    
+    while (result.status !== 'succeeded' && result.status !== 'failed' && attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      result = await replicate.predictions.get(result.id)
+      attempts++
+      if (attempts % 5 === 0) {
+        console.log(`⏳ Still processing... (${attempts * 2}s)`)
+      }
+    }
+    
+    if (result.status === 'failed') {
+      throw new Error(`Replicate prediction failed: ${result.error || 'Unknown error'}`)
+    }
+    
+    if (result.status !== 'succeeded') {
+      throw new Error(`Replicate prediction timed out after ${maxAttempts * 2} seconds`)
+    }
+    
+    console.log('✅ Prediction succeeded!')
+    
+    let imageUrl = null
+    
+    if (Array.isArray(result.output) && result.output.length > 0) {
+      imageUrl = result.output[0]
+    } else if (typeof result.output === 'string') {
+      imageUrl = result.output
+    } else if (result.output && typeof result.output === 'object') {
+      imageUrl = result.output.url || result.output.image || result.output.image_url
+    }
+    
+    if (!imageUrl || typeof imageUrl !== 'string' || imageUrl === '{}' || imageUrl.length < 10) {
+      console.error('❌ Invalid image URL:', imageUrl)
+      console.error('Full output:', JSON.stringify(result.output, null, 2))
+      throw new Error('Could not extract valid image URL from Replicate response')
+    }
+    
+    console.log('✅ Image URL extracted:', imageUrl.substring(0, 80) + '...')
+    
+    const localUrl = await downloadAndSaveImage(imageUrl, configModel.outputExtension || 'png')
+    
+    return {
+      success: true,
+      url: localUrl,
+      model: modelName,
+      used_reference: !!referenceImage,
+    }
+    
+  } catch (err) {
+    console.error('❌ Replicate generation failed:', err.message)
+    throw new Error(`Image generation failed: ${err.message}`)
+  }
+}
 
-  const handleDelete = async () => {
-    if (!confirm(`Delete project "${project.name}"? This cannot be undone.`)) return
-    setDeleting(true)
+// ============================================================
+// Background Removal (used by the PSD layering pipeline)
+// ============================================================
+export async function removeBackground(imageUrl) {
+  const replicate = getReplicate()
+
+  try {
+    console.log('✂️ Removing background for layer separation...')
+    const prediction = await replicate.predictions.create({
+      version: '851-labs/background-remover',
+      input: {
+        image: imageUrl,
+        background_type: 'rgba',
+        format: 'png',
+        threshold: 0,
+      },
+    })
+
+    let result = prediction
+    let attempts = 0
+    const maxAttempts = 30
+
+    while (result.status !== 'succeeded' && result.status !== 'failed' && attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      result = await replicate.predictions.get(result.id)
+      attempts++
+    }
+
+    if (result.status !== 'succeeded') {
+      throw new Error(`Background removal failed or timed out: ${result.error || result.status}`)
+    }
+
+    const cutoutUrl = Array.isArray(result.output) ? result.output[0] : result.output
+    if (!cutoutUrl || typeof cutoutUrl !== 'string') {
+      throw new Error('Background remover returned no usable output')
+    }
+
+    return cutoutUrl
+  } catch (err) {
+    console.error('❌ Background removal failed:', err.message)
+    throw new Error(`Background removal failed: ${err.message}`)
+  }
+}
+
+// ============================================================
+// Fallback function
+// ============================================================
+export async function generateImageWithFallback(prompt, fallbackModels = ['flux-schnell', 'flux-dev', 'sdxl'], referenceImage = null) {
+  let lastError = null
+  
+  for (const model of fallbackModels) {
     try {
-      await adminApi.deleteProject(project.id)
-      toast.success('Project deleted')
-      onDelete(project.id)
+      console.log(`🔄 Trying fallback model: ${model}`)
+      const result = await generateImageWithReplicate(prompt, model, referenceImage)
+      console.log(`✅ Success with ${model}`)
+      return result
     } catch (err) {
-      toast.error('Delete failed')
-    } finally {
-      setDeleting(false)
+      console.warn(`⚠️ ${model} failed:`, err.message)
+      lastError = err
     }
   }
+  
+  throw new Error(`All models failed: ${lastError?.message || 'Unknown error'}`)
+}
 
-  return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-stone-700 flex-shrink-0">
-        <h2 className="text-base font-semibold text-white">
-          {isNew ? 'New Project' : `Edit: ${project.name}`}
-        </h2>
-        <button onClick={onClose} className="p-2 rounded-lg hover:bg-stone-700 text-stone-400 hover:text-stone-200 transition-colors">
-          <X size={16} />
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="col-span-2">
-            <label className="block text-xs font-medium text-stone-400 mb-1.5">Project Name *</label>
-            <input
-              value={form.name}
-              onChange={e => update('name', e.target.value)}
-              className="input-field"
-              placeholder="e.g. Menu Item Images"
-            />
-          </div>
-
-          <div className="col-span-2">
-            <label className="block text-xs font-medium text-stone-400 mb-1.5">
-              Image Generation Model
-              <span className="text-stone-600 font-normal ml-1">— Choose which AI model to use</span>
-            </label>
-            <select
-              value={form.image_model || 'flux-schnell'}
-              onChange={e => update('image_model', e.target.value)}
-              className="input-field"
-            >
-              <option value="flux-schnell">FLUX-Schnell (Cheapest, $0.003/image)</option>
-              <option value="flux-dev">FLUX-Dev (Good quality, $0.025/image)</option>
-              <option value="flux-1.1-pro">FLUX-1.1-Pro (Best quality, $0.04/image)</option>
-              <option value="sdxl">SDXL (Open source, ~$0.003-0.005/image)</option>
-              <option value="ideogram-v3-turbo">Ideogram v3 Turbo (Good for text, ~$0.04/image)</option>
-            </select>
-            <p className="text-xs text-stone-500 mt-1">Different models have different costs and quality levels</p>
-          </div>
-        </div>
-
-        <div className="border border-stone-700 rounded-xl p-4 bg-stone-900/50">
-          <label className="block text-xs font-medium text-stone-400 mb-3">
-            Reference Images (Visual Examples)
-            <span className="text-stone-600 font-normal ml-1">— Upload images that represent the style you want</span>
-          </label>
-          
-          <div className="flex items-center gap-3 mb-3">
-            <label className="cursor-pointer flex items-center gap-2 bg-stone-700 hover:bg-stone-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-colors">
-              <Upload size={14} />
-              {uploadingImage ? 'Uploading...' : 'Upload Reference Image'}
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleImageUpload}
-                disabled={uploadingImage}
-                className="hidden"
-              />
-            </label>
-            <input
-              value={pendingCategory}
-              onChange={e => setPendingCategory(e.target.value)}
-              className="input-field w-40 text-sm"
-              placeholder="category e.g. cold"
-              title="Category tag applied to the next uploaded image (e.g. cold, hot, food)"
-            />
-            <p className="text-xs text-stone-500">PNG, JPG, WebP (max 5MB)</p>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            {form.reference_images.map((img) => (
-              <div key={img.id} className="relative group">
-                <img
-                  src={img.url}
-                  alt={img.name}
-                  className="w-full h-32 object-cover rounded-xl border border-stone-700"
-                />
-                <button
-                  onClick={() => removeImage(img.id)}
-                  className="absolute top-2 right-2 p-1 bg-red-500/80 hover:bg-red-500 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  <X size={12} />
-                </button>
-                <p className="text-xs text-stone-400 mt-1 truncate">{img.name}</p>
-                <input
-                  value={img.category || 'general'}
-                  onChange={e => setForm(f => ({
-                    ...f,
-                    reference_images: f.reference_images.map(i =>
-                      i.id === img.id ? { ...i, category: e.target.value } : i
-                    )
-                  }))}
-                  className="input-field text-xs mt-1 py-1"
-                  placeholder="category"
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="border border-stone-700 rounded-xl p-4 bg-stone-900/50">
-          <label className="block text-xs font-medium text-stone-400 mb-3">
-            Attached Files (Documents)
-            <span className="text-stone-600 font-normal ml-1">— Upload PDF, Word, or text files with guidelines</span>
-          </label>
-          
-          <div className="flex items-center gap-3 mb-3">
-            <label className="cursor-pointer flex items-center gap-2 bg-stone-700 hover:bg-stone-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-colors">
-              <Plus size={14} />
-              {uploadingFile ? 'Uploading...' : 'Upload File'}
-              <input
-                type="file"
-                accept=".txt,.pdf,.doc,.docx,.json,.md"
-                onChange={handleFileUpload}
-                disabled={uploadingFile}
-                className="hidden"
-              />
-            </label>
-            <p className="text-xs text-stone-500">TXT, PDF, DOC, DOCX, JSON, MD</p>
-          </div>
-
-          <div className="space-y-2">
-            {form.attached_files.map((file) => (
-              <div key={file.id} className="flex items-center justify-between bg-stone-800 rounded-lg px-3 py-2">
-                <span className="text-sm text-stone-300 truncate">{file.name}</span>
-                <button
-                  onClick={() => removeFile(file.id)}
-                  className="p-1 hover:bg-stone-700 rounded text-stone-400 hover:text-red-400 transition-colors"
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-stone-400 mb-1.5">
-            Reference Criteria / Visual Requirements
-            <span className="text-stone-600 font-normal ml-1">— Describe the style, composition, colors from the reference images</span>
-          </label>
-          <textarea
-            value={form.reference_criteria}
-            onChange={e => update('reference_criteria', e.target.value)}
-            rows={4}
-            className="input-field resize-none"
-            placeholder="Example: Images should follow the brand guidelines...
-- Warm, golden lighting like the reference photos
-- Plating style: Minimalist with fresh herbs on top
-- Color palette: Earth tones with green accents
-- Composition: 70% food, 30% negative space
-- Mood: Premium, inviting, rustic-elegant"
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-stone-400 mb-1.5">Description</label>
-          <textarea
-            value={form.description}
-            onChange={e => update('description', e.target.value)}
-            rows={2}
-            className="input-field resize-none"
-            placeholder="Brief description of what this project handles…"
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-stone-400 mb-1.5">
-            Trigger Keywords
-            <span className="text-stone-600 font-normal ml-1">— used to auto-match user requests</span>
-          </label>
-          <input
-            value={form.trigger_keywords}
-            onChange={e => update('trigger_keywords', e.target.value)}
-            className="input-field"
-            placeholder="menu food dish plate meal photo image…"
-          />
-          <p className="text-xs text-stone-600 mt-1">Space-separated keywords that signal this project.</p>
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-stone-400 mb-1.5">
-            System Prompt / Output Criteria
-            <span className="text-stone-600 font-normal ml-1">— guidelines and brand rules for AI generation</span>
-          </label>
-          <textarea
-            value={form.system_prompt}
-            onChange={e => update('system_prompt', e.target.value)}
-            rows={10}
-            className="input-field resize-none font-mono text-xs leading-relaxed"
-            placeholder="You are a professional…&#10;&#10;BRAND GUIDELINES:&#10;- Style: …"
-          />
-        </div>
-      </div>
-
-      <div className="flex items-center gap-3 px-6 py-4 border-t border-stone-700 flex-shrink-0">
-        {!isNew && (
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            className="flex items-center gap-2 text-rose-400 hover:text-rose-300 text-sm disabled:opacity-50 transition-colors"
-          >
-            <Trash2 size={14} />
-            {deleting ? 'Deleting…' : 'Delete'}
-          </button>
-        )}
-        <div className="flex-1" />
-        <button
-          onClick={onClose}
-          className="px-4 py-2 text-sm text-stone-400 hover:text-stone-200 transition-colors"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="flex items-center gap-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-stone-950 font-semibold text-sm px-5 py-2 rounded-xl transition-colors"
-        >
-          <Save size={14} />
-          {saving ? 'Saving…' : isNew ? 'Create Project' : 'Save Changes'}
-        </button>
-      </div>
-    </div>
-  )
+// ============================================================
+// Health check
+// ============================================================
+export async function checkReplicateHealth() {
+  try {
+    const replicate = getReplicate()
+    await replicate.predictions.create({
+      version: 'black-forest-labs/flux-schnell',
+      input: {
+        prompt: 'test',
+        num_outputs: 1,
+      }
+    })
+    return { status: 'healthy', credits_available: true }
+  } catch (err) {
+    return { status: 'unhealthy', error: err.message }
+  }
 }

@@ -21,7 +21,7 @@ function getReplicate() {
 }
 
 // Function to download and save image locally
-async function downloadAndSaveImage(imageUrl) {
+async function downloadAndSaveImage(imageUrl, extension = 'png') {
   try {
     console.log('📥 Downloading image from:', imageUrl.substring(0, 80) + '...')
     
@@ -54,7 +54,7 @@ async function downloadAndSaveImage(imageUrl) {
       }
     }
 
-    const filename = `${uuidv4()}.png`
+    const filename = `${uuidv4()}.${extension}`
     const filepath = path.join(uploadDir, filename)
     fs.writeFileSync(filepath, response.data)
     console.log('✅ Image saved locally:', filename)
@@ -106,7 +106,29 @@ const MODEL_CONFIGS = {
       num_inference_steps: 25,
       guidance_scale: 7.5,
     }
-  }
+  },
+  // Recraft V4 — design-first raster model. Stronger prompt accuracy, text
+  // rendering, and art-directed composition than Flux for branded/marketing
+  // work. Released Feb 2026.
+  'recraft-v4': {
+    version: 'recraft-ai/recraft-v4',
+    input: {
+      prompt: '',
+      aspect_ratio: '1:1',
+    },
+    outputExtension: 'png',
+  },
+  // Recraft V4 SVG — the only current model that outputs TRUE native vector
+  // paths (not a traced raster). Opens directly in Illustrator/Figma with
+  // structured, editable layers. Use for logos, icons, and vector assets.
+  'recraft-v4-svg': {
+    version: 'recraft-ai/recraft-v4-svg',
+    input: {
+      prompt: '',
+      aspect_ratio: '1:1',
+    },
+    outputExtension: 'svg',
+  },
 }
 
 // ============================================================
@@ -150,6 +172,17 @@ export async function generateImageWithReplicate(prompt, modelName = 'flux-schne
     if (modelName === 'sdxl') {
       input.image = referenceImage
       input.denoising_strength = isModification ? 0.5 : 0.3
+    }
+
+    if (modelName.startsWith('recraft')) {
+      // Recraft locks a product's exact look via a separate "custom style"
+      // API step (upload references → get a style_id → pass it into
+      // generation), not a direct img2img `image` field like Flux/SDXL.
+      // That style-creation step isn't wired up yet, so for now the
+      // reference image only informs the text prompt (via the vision
+      // description built upstream in aiService.js), not literal pixel
+      // preservation. Flag this so it's not silently ignored.
+      console.warn('⚠️ Recraft models don\'t support direct img2img reference locking yet (needs Recraft custom-style API). Reference is being used as a text description only — for exact product/logo preservation, use a flux-* model.')
     }
   }
   
@@ -204,7 +237,7 @@ export async function generateImageWithReplicate(prompt, modelName = 'flux-schne
     
     console.log('✅ Image URL extracted:', imageUrl.substring(0, 80) + '...')
     
-    const localUrl = await downloadAndSaveImage(imageUrl)
+    const localUrl = await downloadAndSaveImage(imageUrl, configModel.outputExtension || 'png')
     
     return {
       success: true,
@@ -216,6 +249,50 @@ export async function generateImageWithReplicate(prompt, modelName = 'flux-schne
   } catch (err) {
     console.error('❌ Replicate generation failed:', err.message)
     throw new Error(`Image generation failed: ${err.message}`)
+  }
+}
+
+// ============================================================
+// Background Removal (used by the PSD layering pipeline)
+// ============================================================
+export async function removeBackground(imageUrl) {
+  const replicate = getReplicate()
+
+  try {
+    console.log('✂️ Removing background for layer separation...')
+    const prediction = await replicate.predictions.create({
+      version: '851-labs/background-remover',
+      input: {
+        image: imageUrl,
+        background_type: 'rgba',
+        format: 'png',
+        threshold: 0,
+      },
+    })
+
+    let result = prediction
+    let attempts = 0
+    const maxAttempts = 30
+
+    while (result.status !== 'succeeded' && result.status !== 'failed' && attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      result = await replicate.predictions.get(result.id)
+      attempts++
+    }
+
+    if (result.status !== 'succeeded') {
+      throw new Error(`Background removal failed or timed out: ${result.error || result.status}`)
+    }
+
+    const cutoutUrl = Array.isArray(result.output) ? result.output[0] : result.output
+    if (!cutoutUrl || typeof cutoutUrl !== 'string') {
+      throw new Error('Background remover returned no usable output')
+    }
+
+    return cutoutUrl
+  } catch (err) {
+    console.error('❌ Background removal failed:', err.message)
+    throw new Error(`Background removal failed: ${err.message}`)
   }
 }
 

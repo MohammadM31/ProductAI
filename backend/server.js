@@ -27,9 +27,11 @@ app.use(cors({
   credentials: true,
   optionsSuccessStatus: 200
 }))
-
-// Handle preflight requests explicitly
-app.options('*', cors())
+// Note: no separate app.options('*', cors()) here — app.use(cors(...)) already
+// handles OPTIONS preflight requests on its own. A bare '*' route pattern is
+// also a known crash trigger with some path-to-regexp versions Express can
+// resolve to, which would silently prevent the whole server from booting
+// (explaining "no CORS header at all" — the request never reaches Express).
 
 app.use(express.json({ limit: '100mb' }))
 app.use(express.urlencoded({ extended: true, limit: '100mb' }))
