@@ -643,6 +643,17 @@ export async function saveOutput({ sessionId, projectId, departmentId, outputTyp
 }
 
 // ============================================================
+// Get All Outputs (across every department/project — admin view)
+// ============================================================
+export async function getAllOutputs() {
+  return searchDocuments(config.indices.outputs, {
+    query: { match_all: {} },
+    sort: [{ created_at: { order: 'desc' } }],
+    size: 500,
+  })
+}
+
+// ============================================================
 // Get Outputs by Department
 // ============================================================
 export async function getOutputsByDepartment(departmentId) {
