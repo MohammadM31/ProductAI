@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid'
-import { transcribeAudio } from '../services/deepgramService.js'//import { transcribeAudio } from '../services/whisperService.js'
+import { transcribeAudio } from '../services/deepgramService.js'
 import {
   mapRequestToProject,
   generateOutput,
@@ -14,6 +14,7 @@ import {
   getDocument,
 } from '../services/databaseService.js'
 import { config } from '../config/index.js'
+import { trackUserRequest, getPersonalizedSuggestions as getSuggestions } from '../services/userHistoryService.js'
 
 export async function processVoice(req, res) {
   const audioFile = req.file
@@ -41,7 +42,7 @@ export async function processText(req, res) {
 }
 
 // ============================================================
-// CHANGED: Process Request with Department Info
+// Process Request with Department Info
 // ============================================================
 async function processRequest(res, userText, sessionId, hintProjectId, user) {
   let project = null
@@ -66,9 +67,7 @@ async function processRequest(res, userText, sessionId, hintProjectId, user) {
     })
   }
 
-  // ============================================================
-  // NEW: Get Department Info for Response
-  // ============================================================
+  // Get Department Info for Response
   let departmentName = 'Unassigned'
   let department = null
   try {
@@ -83,6 +82,11 @@ async function processRequest(res, userText, sessionId, hintProjectId, user) {
   console.log(`📋 Routing to: "${project.name}"`)
   console.log(`   Department: ${departmentName}`)
   console.log(`   Output Type: ${project.output_type}`)
+
+  // Track user request for personalization
+  if (user && user.id) {
+    await trackUserRequest(user.id, project.id, userText)
+  }
 
   // Generate the output
   const result = await generateOutput(userText, project)
@@ -100,9 +104,6 @@ async function processRequest(res, userText, sessionId, hintProjectId, user) {
     requesterEmail: user?.email,
   })
 
-  // ============================================================
-  // CHANGED: Return with Department Info
-  // ============================================================
   return res.json({
     session_id: sessionId,
     output_id: saved.id,
@@ -151,6 +152,11 @@ export async function iterateRequest(req, res) {
     existing.content,
     project
   )
+
+  // Track iteration as a new request for personalization
+  if (user && user.id) {
+    await trackUserRequest(user.id, project.id, `${existing.original_request} [Revision: ${feedback}]`)
+  }
 
   const saved = await saveOutput({
     sessionId: session_id || existing.session_id,
@@ -304,7 +310,18 @@ export async function getMyOutputs(req, res) {
   }
 }
 
-// Debug routes (keep as is)
+export async function getPersonalizedSuggestions(req, res) {
+  try {
+    const userId = req.user.id
+    const suggestions = await getSuggestions(userId)
+    return res.json({ suggestions })
+  } catch (err) {
+    console.error('Error getting suggestions:', err.message)
+    return res.status(500).json({ error: 'Failed to get suggestions' })
+  }
+}
+
+// Debug routes
 export async function debugImageContent(req, res) {
   const { output_id } = req.params
   

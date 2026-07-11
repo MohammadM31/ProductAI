@@ -5,15 +5,6 @@ import { v4 as uuidv4 } from 'uuid'
 import { generateImageWithReplicate, generateImageWithFallback } from './replicateService.js'
 import { buildLayeredPsd } from './psdService.js'
 
-/*let openaiClient = null
-
-function getOpenAI() {
-  if (!openaiClient) {
-    openaiClient = new OpenAI({ apiKey: config.openai.apiKey })
-  }
-  return openaiClient
-}*/
-
 let deepseekClient = null
 
 function getDeepSeek() {
@@ -25,7 +16,6 @@ function getDeepSeek() {
   }
   return deepseekClient
 }
-
 
 // ============================================================
 // AI-Powered Project Mapping with Department Awareness
@@ -44,8 +34,6 @@ export async function mapRequestToProject(requestText) {
   }
 
   try {
-     //const openai = getOpenAI()
-    
     const departments = await searchDocuments(config.indices.departments, {
       query: { match_all: {} },
       size: 50,
@@ -89,11 +77,9 @@ USER REQUEST: "${requestText}"
 
 Analyze what the user wants to create and which project best matches their intent. Reply with ONLY the project ID.`
 
-    /*const resp = await openai.chat.completions.create({
-      model: config.openai.model,*/
-      const deepseek = getDeepSeek()
-const resp = await deepseek.chat.completions.create({
-  model: config.deepseek.model || 'deepseek-chat',
+    const deepseek = getDeepSeek()
+    const resp = await deepseek.chat.completions.create({
+      model: config.deepseek.model || 'deepseek-chat',
       max_tokens: 50,
       temperature: 0.1,
       messages: [
@@ -249,12 +235,14 @@ function buildSystemPrompt(project) {
 // Generate Output
 // ============================================================
 export async function generateOutput(userRequest, project) {
-  if (project.output_type === 'image' || project.output_type === 'psd' || project.output_type === 'svg') {
+  // Fix: Ensure image generation for menu items and any image-type projects
+  const outputType = project.output_type || 'image'
+  
+  if (outputType === 'image' || outputType === 'psd' || outputType === 'svg') {
     return generateImageOutput(userRequest, project)
   }
   return generateTextOutput(userRequest, project)
 }
-
 
 async function detectImageCategory(userRequest, availableCategories) {
   if (availableCategories.length <= 1) {
@@ -292,7 +280,6 @@ async function detectImageCategory(userRequest, availableCategories) {
   if (hotWords.some(w => lower.includes(w)) && availableCategories.includes('hot')) return 'hot'
   return availableCategories[0]
 }
-
 
 // ============================================================
 // Generate Image Output with Dynamic Vision Analysis
@@ -334,6 +321,8 @@ async function generateImageOutput(userRequest, project) {
     // Style images are never used as the img2img base — only their
     // description informs the prompt (see styleDescription below).
     referenceImageUrl = matchedImages[0].url
+    console.log(`📸 Using reference image: ${matchedImages[0].name}`)
+    console.log(`   URL: ${referenceImageUrl ? referenceImageUrl.substring(0, 80) + '...' : 'No URL'}`)
 
     // Analyze ALL matched product images and combine descriptions
     try {
@@ -368,10 +357,8 @@ async function generateImageOutput(userRequest, project) {
   }
 
   // Generate prompt using the dynamic analysis
-  /*const promptResponse = await openai.chat.completions.create({
-    model: config.openai.model,*/
-    const promptResponse = await deepseek.chat.completions.create({
-      model: config.deepseek.model || 'deepseek-chat',
+  const promptResponse = await deepseek.chat.completions.create({
+    model: config.deepseek.model || 'deepseek-chat',
     max_tokens: 600,
     messages: [
       {
@@ -469,7 +456,7 @@ Create a prompt based on the user's request.
         imageUrl: fallbackResult.url,
         imagePrompt,
         modelName: fallbackResult.model,
-        isSvgModel: false, // fallback list is all raster models
+        isSvgModel: false,
         referenceImageUrl,
         fallback: true,
       })
@@ -502,14 +489,12 @@ async function finalizeImageOutput({ project, imageUrl, imagePrompt, modelName, 
       return {
         output_type: 'psd',
         ...base,
-        content: psdUrl,       // the downloadable .psd
-        preview_url: imageUrl, // flattened PNG for quick preview
+        content: psdUrl,
+        preview_url: imageUrl,
         layers,
       }
     } catch (err) {
       console.error('❌ PSD layering failed, falling back to flat image:', err.message)
-      // Don't lose the generated image just because layering failed —
-      // hand back the flat raster with a note instead of erroring out.
       return { output_type: 'image', ...base, psd_error: err.message }
     }
   }
@@ -521,15 +506,11 @@ async function finalizeImageOutput({ project, imageUrl, imagePrompt, modelName, 
 // Generate Text Output
 // ============================================================
 async function generateTextOutput(userRequest, project) {
-  /*const openai = getOpenAI()
+  const deepseek = getDeepSeek()
   const systemPrompt = buildSystemPrompt(project)
 
-  const response = await openai.chat.completions.create({
-    model: config.openai.model,*/
-    const deepseek = getDeepSeek()
-    const systemPrompt = buildSystemPrompt(project)
-const response = await deepseek.chat.completions.create({
-  model: config.deepseek.model || 'deepseek-chat',
+  const response = await deepseek.chat.completions.create({
+    model: config.deepseek.model || 'deepseek-chat',
     max_tokens: 1500,
     messages: [
       {
@@ -583,17 +564,17 @@ async function analyzeImageWithDeepSeek(imageData) {
 // Iterate Output (revision)
 // ============================================================
 export async function iterateOutput(originalRequest, feedback, previousContent, project) {
-  if (project.output_type === 'image' || project.output_type === 'psd' || project.output_type === 'svg') {
+  const outputType = project.output_type || 'image'
+  
+  if (outputType === 'image' || outputType === 'psd' || outputType === 'svg') {
     return generateImageOutput(`${originalRequest}. Modifications requested: ${feedback}`, project)
   }
 
-  const deepseek = getDeepSeek()//const openai = getOpenAI()
+  const deepseek = getDeepSeek()
   const systemPrompt = buildSystemPrompt(project)
 
-  /*const response = await openai.chat.completions.create({
-    model: config.openai.model,*/
-    const response = await deepseek.chat.completions.create({
-      model: config.deepseek.model || 'deepseek-chat',
+  const response = await deepseek.chat.completions.create({
+    model: config.deepseek.model || 'deepseek-chat',
     max_tokens: 1500,
     messages: [
       { role: 'system', content: systemPrompt },

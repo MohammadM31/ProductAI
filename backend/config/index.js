@@ -53,7 +53,6 @@ export const config = {
     password: process.env.OPENSEARCH_PASSWORD || 'admin',
     useSsl: process.env.OPENSEARCH_USE_SSL === 'true',
     caCert,
-    // Additional options for Aiven
     rejectUnauthorized: process.env.OPENSEARCH_REJECT_UNAUTHORIZED !== 'false',
   },
 
@@ -63,6 +62,7 @@ export const config = {
     outputs: 'outputs',
     users: 'users',
     departments: 'departments',
+    user_history: 'user_history',
   },
 
   jwtSecret: process.env.JWT_SECRET || 'change-me-in-production-secret-key',

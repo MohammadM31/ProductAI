@@ -22,7 +22,7 @@ import multer from 'multer'
 export const upload = multer({
   storage: multer.memoryStorage(),
   limits: { 
-    fileSize: 100 * 1024 * 1024, // 100MB
+    fileSize: 100 * 1024 * 1024,
     fieldSize: 100 * 1024 * 1024
   },
   fileFilter: (req, file, cb) => {
@@ -34,7 +34,6 @@ export const upload = multer({
   }
 })
 
-// backend/controllers/adminController.js
 export async function uploadGuidelinesZipHandler(req, res) {
   try {
     if (!req.file) {
@@ -58,9 +57,6 @@ export async function uploadGuidelinesZipHandler(req, res) {
       let allProjects = await getAllProjects()
 
       for (const parsed of result.projects) {
-        // ------------------------------------------------------
-        // 1. Resolve department (fuzzy match by name, else create)
-        // ------------------------------------------------------
         let department = findByFuzzyName(allDepartments, parsed.department)
         if (!department) {
           const deptId = uuidv4()
@@ -75,11 +71,6 @@ export async function uploadGuidelinesZipHandler(req, res) {
           console.log(`✅ Created department: "${department.name}"`)
         }
 
-        // ------------------------------------------------------
-        // 2. Resolve project within that department (fuzzy match
-        //    by folder name, e.g. "Menu Item" -> "Menu Item Images",
-        //    "Instagram Posts" -> "Instagram Posts")
-        // ------------------------------------------------------
         const deptProjects = allProjects.filter(p => p.department_id === department.id)
         let project = findByFuzzyName(deptProjects, parsed.requestType)
 
@@ -91,7 +82,6 @@ export async function uploadGuidelinesZipHandler(req, res) {
         const taggedFiles = parsed.attached_files || []
 
         if (project) {
-          // ---- Merge into existing project ----
           const mergedReferenceImages = [...(project.reference_images || []), ...taggedImages]
           const mergedAttachedFiles = [...(project.attached_files || []), ...taggedFiles]
           const mergedCriteria = parsed.reference_criteria
@@ -103,7 +93,7 @@ export async function uploadGuidelinesZipHandler(req, res) {
             reference_images: mergedReferenceImages,
             attached_files: mergedAttachedFiles,
             reference_criteria: mergedCriteria,
-            output_type: 'image', // this platform is image-generation only
+            output_type: 'image',
           })
 
           updatedProjects.push(updated)
@@ -111,7 +101,6 @@ export async function uploadGuidelinesZipHandler(req, res) {
           allProjects[idx] = updated
           console.log(`🔄 Merged "${categoryTag}" content into existing project: "${project.name}" (${department.name})`)
         } else {
-          // ---- Create new project ----
           const projectId = uuidv4()
           const now = new Date().toISOString()
 
@@ -120,7 +109,7 @@ export async function uploadGuidelinesZipHandler(req, res) {
             name: parsed.requestType || parsed.name || 'Unnamed Project',
             description: parsed.description || `${parsed.requestType} projects`,
             department_id: department.id,
-            output_type: 'image', // this platform is image-generation only
+            output_type: 'image',
             trigger_keywords: (parsed.requestType || '').toLowerCase(),
             system_prompt: parsed.system_prompt || '',
             reference_criteria: parsed.reference_criteria || '',
@@ -157,11 +146,6 @@ export async function uploadGuidelinesZipHandler(req, res) {
   }
 }
 
-// ============================================================
-// Fuzzy name matching helpers
-// Used to match ZIP folder names ("Menu Item", "Instagram Posts")
-// to existing department/project names ("Menu Item Images", "Instagram Posts")
-// ============================================================
 function normalizeName(str) {
   return (str || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 }
@@ -170,20 +154,15 @@ function findByFuzzyName(list, targetName) {
   const target = normalizeName(targetName)
   if (!target) return null
 
-  // 1. Exact normalized match
   let match = list.find(item => normalizeName(item.name) === target)
   if (match) return match
 
-  // 2. Substring match in either direction
-  //    e.g. "menu item" matches "Menu Item Images"
   match = list.find(item => {
     const itemName = normalizeName(item.name)
     return itemName.includes(target) || target.includes(itemName)
   })
   if (match) return match
 
-  // 3. Word-overlap match
-  //    e.g. "instagram posts" folder matches "Instagram Posts" project
   const targetWords = new Set(target.split(' ').filter(w => w.length > 2))
   let best = null
   let bestScore = 0
@@ -198,7 +177,6 @@ function findByFuzzyName(list, targetName) {
   return bestScore > 0 ? best : null
 }
 
-
 export async function listProjects(req, res) {
   try {
     const { role, department_id, id: userId } = req.user
@@ -207,11 +185,9 @@ export async function listProjects(req, res) {
     let projects = []
     
     if (role === 'admin') {
-      // Admin sees ALL projects
       projects = await getAllProjects()
       console.log(`📋 Admin found ${projects.length} total projects`)
     } else if (role === 'dept_user') {
-      // Department user sees ONLY their department's projects
       if (!department_id) {
         console.log('⚠️ Department user has no department_id')
         return res.status(400).json({ error: 'Department user has no department assigned' })
@@ -219,7 +195,6 @@ export async function listProjects(req, res) {
       projects = await getProjectsByDepartment(department_id)
       console.log(`📋 Department user found ${projects.length} projects for department ${department_id}`)
     } else {
-      // Requester sees only their own projects (or none)
       projects = []
       console.log('📋 Requester sees no projects')
     }
@@ -236,7 +211,6 @@ export async function getProject(req, res) {
     const project = await getProjectById(req.params.id)
     if (!project) return res.status(404).json({ error: 'Project not found' })
     
-    // Check if user has access to this project
     const { role, department_id } = req.user
     if (role === 'dept_user' && project.department_id !== department_id) {
       return res.status(403).json({ error: 'Access denied' })
@@ -254,7 +228,6 @@ export async function createProjectHandler(req, res) {
     const data = { ...req.body }
     const { role, department_id, id: userId } = req.user
     
-    // If department user, force department_id to their department
     if (role === 'dept_user') {
       data.department_id = department_id
     }
@@ -279,18 +252,15 @@ export async function updateProjectHandler(req, res) {
     const data = { ...req.body }
     const { role, department_id } = req.user
     
-    // Get existing project to check permissions
     const existingProject = await getProjectById(req.params.id)
     if (!existingProject) {
       return res.status(404).json({ error: 'Project not found' })
     }
     
-    // Department users can only update their own department's projects
     if (role === 'dept_user' && existingProject.department_id !== department_id) {
       return res.status(403).json({ error: 'Access denied' })
     }
     
-    // Department users cannot change department_id
     if (role === 'dept_user' && data.department_id && data.department_id !== department_id) {
       delete data.department_id
     }
@@ -314,13 +284,11 @@ export async function deleteProjectHandler(req, res) {
   try {
     const { role, department_id } = req.user
     
-    // Get existing project to check permissions
     const existingProject = await getProjectById(req.params.id)
     if (!existingProject) {
       return res.status(404).json({ error: 'Project not found' })
     }
     
-    // Department users can only delete their own department's projects
     if (role === 'dept_user' && existingProject.department_id !== department_id) {
       return res.status(403).json({ error: 'Access denied' })
     }
@@ -340,7 +308,7 @@ export async function createDepartmentHandler(req, res) {
   try {
     const { name, description, email, password } = req.body
     
-    console.log('📝 Creating department:', { name, email })
+    console.log('📝 Creating department:', { name, email, password: !!password })
     
     if (!name?.trim() || !email?.trim() || !password?.trim()) {
       return res.status(400).json({ 
@@ -403,13 +371,16 @@ export async function updateDepartmentHandler(req, res) {
     const { id } = req.params
     const { name, description, email, password } = req.body
     
-    console.log('📝 Updating department:', { id, name })
+    console.log('📝 Updating department:', { id, name, email, password: !!password })
     
+    // Update department basic info
     const department = await updateDepartment(id, { 
       name: name?.trim(), 
       description: description?.trim() 
     })
     
+    // Handle credentials update
+    let updatedUser = null
     if (email || password) {
       const users = await searchDocuments(config.indices.users, {
         query: { term: { department_id: id } },
@@ -419,7 +390,8 @@ export async function updateDepartmentHandler(req, res) {
         const user = users[0]
         const updates = {}
         
-        if (email && email !== user.email) {
+        // Update email if provided and different
+        if (email && email.trim() && email !== user.email) {
           const existingUser = await searchDocuments(config.indices.users, {
             query: { term: { email: email.toLowerCase() } },
           })
@@ -428,22 +400,67 @@ export async function updateDepartmentHandler(req, res) {
             return res.status(400).json({ error: 'Email already in use' })
           }
           updates.email = email.toLowerCase()
+          console.log('📧 Updating email to:', email)
         }
         
-        if (password) {
+        // Update password if provided
+        if (password && password.trim()) {
+          if (password.length < 6) {
+            return res.status(400).json({ error: 'Password must be at least 6 characters' })
+          }
           updates.password_hash = await bcrypt.hash(password, 10)
           updates.plain_password = password
           console.log('🔑 Updating password')
         }
         
+        // Save updates if any
         if (Object.keys(updates).length > 0) {
           await updateDocument(config.indices.users, user.id, updates)
           console.log('✅ User credentials updated')
+          
+          // Get updated user
+          const updatedUsers = await searchDocuments(config.indices.users, {
+            query: { term: { department_id: id } },
+          })
+          if (updatedUsers.length > 0) {
+            updatedUser = updatedUsers[0]
+          }
+        } else {
+          updatedUser = user
         }
+      } else if (email && password) {
+        // Create new user if none exists
+        console.log('🆕 Creating new user for department')
+        const hashedPassword = await bcrypt.hash(password, 10)
+        const userId = `user-${id}`
+        
+        const newUser = {
+          id: userId,
+          email: email.toLowerCase(),
+          password_hash: hashedPassword,
+          plain_password: password,
+          name: `${name?.trim() || 'Department'} User`,
+          role: 'dept_user',
+          department_id: id,
+          created_at: new Date().toISOString(),
+        }
+        
+        await indexDocument(config.indices.users, userId, newUser)
+        updatedUser = newUser
+        console.log('✅ New user created with credentials')
       }
     }
     
-    return res.json({ department })
+    return res.json({ 
+      department,
+      user: updatedUser ? {
+        email: updatedUser.email,
+        name: updatedUser.name,
+        role: updatedUser.role,
+        department_id: updatedUser.department_id,
+        plain_password: updatedUser.plain_password
+      } : null
+    })
   } catch (err) {
     console.error('Update department error:', err.message)
     return res.status(500).json({ error: err.message })
@@ -484,9 +501,6 @@ export async function deleteDepartmentHandler(req, res) {
   }
 }
 
-// ============================================================
-// List all Department Users
-// ============================================================
 export async function listDepartmentUsers(req, res) {
   try {
     const users = await searchDocuments(config.indices.users, {
@@ -510,9 +524,6 @@ export async function listDepartmentUsers(req, res) {
   }
 }
 
-// ============================================================
-// Get Department User (RETURNS PLAIN PASSWORD FOR ADMIN)
-// ============================================================
 export async function getDepartmentUser(req, res) {
   try {
     const { id } = req.params
@@ -547,12 +558,8 @@ export async function getDepartmentUser(req, res) {
   }
 }
 
-// ============================================================
-// List Departments
-// ============================================================
 export async function listDepartments(req, res) {
   try {
-    // Only admin can list all departments
     if (req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Access denied' })
     }
@@ -565,9 +572,6 @@ export async function listDepartments(req, res) {
   }
 }
 
-// ============================================================
-// List Outputs (with department filtering)
-// ============================================================
 export async function listOutputs(req, res) {
   try {
     const { role, department_id } = req.user
@@ -581,7 +585,6 @@ export async function listOutputs(req, res) {
       if (projectId) {
         outputs = await getOutputsByProject(projectId)
       } else if (role === 'admin') {
-        // Admin sees every request across every department
         outputs = await getAllOutputs()
       } else {
         if (!department_id) {
@@ -605,9 +608,6 @@ export async function listOutputs(req, res) {
   }
 }
 
-// ============================================================
-// Analyze Reference Image
-// ============================================================
 export async function analyzeReferenceImage(req, res) {
   const { image } = req.body
   if (!image) {
@@ -620,8 +620,8 @@ export async function analyzeReferenceImage(req, res) {
       baseURL: config.deepseek.baseURL || 'https://api.deepseek.com',
     })
     
-    const response = await deepseek.chat.completions.create({               //await openai.chat.completions.create({
-      model: config.deepseek.visionModel || 'deepseek-vl',                  //model: 'gpt-4-vision-preview',
+    const response = await deepseek.chat.completions.create({
+      model: config.deepseek.visionModel || 'deepseek-vl',
       max_tokens: 300,
       messages: [
         {
@@ -656,13 +656,10 @@ export async function analyzeReferenceImage(req, res) {
     console.error('Image analysis failed:', err.message)
     return res.json({ 
       analysis: 'Reference image for style guidance. Use its colors, composition, and mood as inspiration.' 
-    })        //return res.status(500).json({ error: 'Failed to analyze image' })
+    })
   }
 }
 
-// ============================================================
-// Export Output
-// ============================================================
 export async function exportOutput(req, res) {
   const { id } = req.params
   const { format = 'json' } = req.query

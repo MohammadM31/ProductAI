@@ -51,6 +51,9 @@ export const requestApi = {
 
   getMyOutputs: () =>
     api.get('/api/request/my-outputs').then(r => r.data),
+  getSuggestions: () =>
+    api.get('/api/request/suggestions').then(r => r.data),
+
 }
 
 export const adminApi = {

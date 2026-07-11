@@ -107,9 +107,6 @@ const MODEL_CONFIGS = {
       guidance_scale: 7.5,
     }
   },
-  // Recraft V4 — design-first raster model. Stronger prompt accuracy, text
-  // rendering, and art-directed composition than Flux for branded/marketing
-  // work. Released Feb 2026.
   'recraft-v4': {
     version: 'recraft-ai/recraft-v4',
     input: {
@@ -118,9 +115,6 @@ const MODEL_CONFIGS = {
     },
     outputExtension: 'png',
   },
-  // Recraft V4 SVG — the only current model that outputs TRUE native vector
-  // paths (not a traced raster). Opens directly in Illustrator/Figma with
-  // structured, editable layers. Use for logos, icons, and vector assets.
   'recraft-v4-svg': {
     version: 'recraft-ai/recraft-v4-svg',
     input: {
@@ -156,15 +150,13 @@ export async function generateImageWithReplicate(prompt, modelName = 'flux-schne
       // Replicate's Flux img2img field is `prompt_strength`, NOT `strength`.
       // Scale is 0 = keep the reference image as-is, 1 = ignore it completely.
       // So LOWER values keep us close to the reference; higher values let the
-      // prompt override more of it. (Previously this used the wrong field name
-      // AND the wrong direction, which is why generations drifted away from
-      // the reference cup design instead of preserving it.)
+      // prompt override more of it.
       if (isModification) {
-        input.prompt_strength = 0.5
-        console.log('   Modification mode: prompt_strength 0.5 (apply the requested change, keep the rest close to reference)')
+        input.prompt_strength = 0.4  // Changed from 0.5 to 0.4
+        console.log('   Modification mode: prompt_strength 0.4 (apply the requested change, keep the rest close to reference)')
       } else {
-        input.prompt_strength = 0.25
-        console.log('   Replication mode: prompt_strength 0.25 (stay close to reference design)')
+        input.prompt_strength = 0.15  // Changed from 0.25 to 0.15
+        console.log('   Replication mode: prompt_strength 0.15 (very close to reference)')
       }
       input.guidance_scale = 3.5
     }
@@ -175,13 +167,6 @@ export async function generateImageWithReplicate(prompt, modelName = 'flux-schne
     }
 
     if (modelName.startsWith('recraft')) {
-      // Recraft locks a product's exact look via a separate "custom style"
-      // API step (upload references → get a style_id → pass it into
-      // generation), not a direct img2img `image` field like Flux/SDXL.
-      // That style-creation step isn't wired up yet, so for now the
-      // reference image only informs the text prompt (via the vision
-      // description built upstream in aiService.js), not literal pixel
-      // preservation. Flag this so it's not silently ignored.
       console.warn('⚠️ Recraft models don\'t support direct img2img reference locking yet (needs Recraft custom-style API). Reference is being used as a text description only — for exact product/logo preservation, use a flux-* model.')
     }
   }

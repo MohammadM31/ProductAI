@@ -26,6 +26,7 @@ const USER_MAPPING = {
       name: { type: 'text', fields: { keyword: { type: 'keyword' } } },
       role: { type: 'keyword' },
       department_id: { type: 'keyword' },
+      plain_password: { type: 'keyword' },
       created_at: { type: 'date' },
     },
   },
@@ -64,6 +65,7 @@ const PROJECT_MAPPING = {
           description: { type: 'text' },
           style_analysis: { type: 'text' },
           category: { type: 'keyword' },
+          ref_type: { type: 'keyword' },
         }
       },
       attached_files: {
@@ -98,7 +100,6 @@ const CONVERSATION_MAPPING = {
   settings: { number_of_shards: 1, number_of_replicas: 0 },
 }
 
-// MODIFIED: Updated OUTPUT_MAPPING with requester fields
 const OUTPUT_MAPPING = {
   mappings: {
     properties: {
@@ -111,7 +112,6 @@ const OUTPUT_MAPPING = {
       original_request: { type: 'text' },
       status: { type: 'keyword' },
       created_at: { type: 'date' },
-      // NEW: Requester info fields
       requester_id: { type: 'keyword' },
       requester_name: { type: 'text', fields: { keyword: { type: 'keyword' } } },
       requester_email: { type: 'keyword' },
@@ -119,7 +119,21 @@ const OUTPUT_MAPPING = {
       confirmed_by: { type: 'keyword' },
       confirmed_by_name: { type: 'text', fields: { keyword: { type: 'keyword' } } },
       confirmed_by_email: { type: 'keyword' },
+      dalle_prompt: { type: 'text' },
+      model_used: { type: 'keyword' },
     },
+  },
+  settings: { number_of_shards: 1, number_of_replicas: 0 },
+}
+
+const USER_HISTORY_MAPPING = {
+  mappings: {
+    properties: {
+      user_id: { type: 'keyword' },
+      project_id: { type: 'keyword' },
+      request_text: { type: 'text' },
+      timestamp: { type: 'date' }
+    }
   },
   settings: { number_of_shards: 1, number_of_replicas: 0 },
 }
@@ -132,6 +146,7 @@ export async function initializeIndices() {
     { name: config.indices.projects, mapping: PROJECT_MAPPING },
     { name: config.indices.conversations, mapping: CONVERSATION_MAPPING },
     { name: config.indices.outputs, mapping: OUTPUT_MAPPING },
+    { name: config.indices.user_history, mapping: USER_HISTORY_MAPPING },
   ]
 
   for (const { name, mapping } of indices) {

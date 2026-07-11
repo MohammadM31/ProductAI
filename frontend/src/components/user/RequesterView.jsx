@@ -36,10 +36,35 @@ export default function RequesterView() {
   const [selectedHistoryOutput, setSelectedHistoryOutput] = useState(null)
   const [showChatFromHistory, setShowChatFromHistory] = useState(false)
 
+  // Personalization state
+  const [suggestions, setSuggestions] = useState([])
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false)
+
   const panelRef = useRef(null)
   const resizeRef = useRef(null)
 
   const isProcessing = requestStatus === 'processing' || requestStatus === 'iterating'
+
+  // Load personalized suggestions
+  useEffect(() => {
+    if (user) {
+      loadPersonalizedSuggestions()
+    }
+  }, [user])
+
+  const loadPersonalizedSuggestions = async () => {
+    setLoadingSuggestions(true)
+    try {
+      const response = await requestApi.getSuggestions()
+      setSuggestions(response.suggestions || [])
+    } catch (err) {
+      console.error('Failed to load suggestions:', err)
+      // Fallback to default suggestions
+      setSuggestions([])
+    } finally {
+      setLoadingSuggestions(false)
+    }
+  }
 
   useEffect(() => {
     dispatch({ type: 'SET_TEXT_INPUT', payload: textInput })
@@ -64,9 +89,6 @@ export default function RequesterView() {
         setIsMapping(true)
         try {
           const response = await requestApi.mapRequest(textInput)
-          // ============================================================
-          // CHANGED: Department info is now returned from API
-          // ============================================================
           setMappedProject(response.project)
         } catch (err) {
           setMappedProject(null)
@@ -165,6 +187,8 @@ export default function RequesterView() {
     try {
       const result = await requestApi.sendText(text, sessionId, mappedProject?.id)
       dispatch({ type: 'SET_CURRENT_OUTPUT', payload: result })
+      // Reload suggestions after making a request
+      loadPersonalizedSuggestions()
       if (showHistory) loadMyRequests()
     } catch (err) {
       toast.error(err.response?.data?.error || 'Request failed')
@@ -177,6 +201,7 @@ export default function RequesterView() {
     try {
       const result = await requestApi.iterate(currentOutput.output_id, feedback, sessionId)
       dispatch({ type: 'SET_CURRENT_OUTPUT', payload: result })
+      loadPersonalizedSuggestions()
     } catch (err) {
       toast.error(err.response?.data?.error || 'Revision failed')
       dispatch({ type: 'SET_REQUEST_STATUS', payload: 'done' })
@@ -190,6 +215,7 @@ export default function RequesterView() {
       dispatch({ type: 'CLEAR_OUTPUT' })
       setTextInput('')
       dispatch({ type: 'SET_TEXT_INPUT', payload: '' })
+      loadPersonalizedSuggestions()
       if (showHistory) loadMyRequests()
     } catch (err) {
       toast.error('Failed to send. Please try again.')
@@ -219,6 +245,13 @@ export default function RequesterView() {
     setShowChatFromHistory(false)
     setSelectedHistoryOutput(null)
   }
+
+  const defaultSuggestions = [
+    { text: 'Create a menu image for grilled salmon with lemon butter' },
+    { text: 'Make an Instagram post for our summer promotion' },
+    { text: 'Generate a photo for the truffle pasta dish' },
+    { text: 'Create a football pitch promotional image' },
+  ]
 
   if (showChatFromHistory && selectedHistoryOutput) {
     return (
@@ -287,7 +320,7 @@ export default function RequesterView() {
   }
 
   // ============================================================
-  // CHANGED: Main view with Department Display
+  // Main View with Department Display and Personalized Suggestions
   // ============================================================
   return (
     <div className="flex h-full w-full">
@@ -322,9 +355,7 @@ export default function RequesterView() {
             </div>
           ) : mappedProject ? (
             <div className="space-y-4">
-              {/* ============================================================
-              NEW: Department Badge
-              ============================================================ */}
+              {/* Department Badge */}
               <div className="flex items-center gap-2 bg-stone-800 rounded-lg px-3 py-2 border border-stone-700">
                 <Building2 size={14} className="text-amber-400" />
                 <span className="text-xs text-stone-300">
@@ -456,27 +487,81 @@ export default function RequesterView() {
           <p className="text-stone-400 text-sm mt-2">
             Speak or type your request — the AI will automatically route it to the right department.
           </p>
+          {suggestions.length > 0 && (
+            <p className="text-xs text-stone-500 mt-1">
+              💡 Personalized based on your frequent requests
+            </p>
+          )}
         </div>
 
+        {/* Personalized Suggestions */}
         <div className="grid grid-cols-1 gap-2 w-full text-sm">
-          {[
-            '📸 "Create a menu image for grilled salmon with lemon butter"',
-            '📱 "Make an Instagram post for our summer promotion"',
-            '🍝 "Generate a photo for the truffle pasta dish"',
-            '⚽ "Create a football pitch promotional image"',
-          ].map(ex => (
-            <button
-              key={ex}
-              onClick={() => {
-                const text = ex.replace(/^[^\s]+\s"/, '').replace(/"$/, '')
-                setTextInput(text)
-                setInputMode('text')
-              }}
-              className="text-left bg-stone-800/50 border border-stone-700 hover:border-amber-500/40 hover:bg-stone-800 rounded-xl px-4 py-3 text-stone-400 hover:text-stone-200 transition-all"
-            >
-              {ex}
-            </button>
-          ))}
+          {loadingSuggestions ? (
+            <div className="text-stone-400 text-center py-4 flex items-center justify-center gap-2">
+              <Loader2 size={16} className="animate-spin text-amber-400" />
+              Loading suggestions...
+            </div>
+          ) : suggestions.length > 0 ? (
+            suggestions.map((suggestion, index) => (
+              <button
+                key={index}
+                onClick={() => {
+                  setTextInput(suggestion.text)
+                  setInputMode('text')
+                }}
+                className="text-left bg-stone-800/50 border border-stone-700 hover:border-amber-500/40 hover:bg-stone-800 rounded-xl px-4 py-3 text-stone-400 hover:text-stone-200 transition-all group"
+              >
+                <div className="flex items-center gap-2">
+                  {suggestion.frequency && (
+                    <span className="text-xs text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full flex-shrink-0">
+                      ⭐ {suggestion.frequency}x
+                    </span>
+                  )}
+                  <span className="truncate">{suggestion.text}</span>
+                </div>
+              </button>
+            ))
+          ) : (
+            // Fallback to default suggestions
+            <>
+              <button
+                onClick={() => {
+                  setTextInput('Create a menu image for grilled salmon with lemon butter')
+                  setInputMode('text')
+                }}
+                className="text-left bg-stone-800/50 border border-stone-700 hover:border-amber-500/40 hover:bg-stone-800 rounded-xl px-4 py-3 text-stone-400 hover:text-stone-200 transition-all"
+              >
+                📸 "Create a menu image for grilled salmon with lemon butter"
+              </button>
+              <button
+                onClick={() => {
+                  setTextInput('Make an Instagram post for our summer promotion')
+                  setInputMode('text')
+                }}
+                className="text-left bg-stone-800/50 border border-stone-700 hover:border-amber-500/40 hover:bg-stone-800 rounded-xl px-4 py-3 text-stone-400 hover:text-stone-200 transition-all"
+              >
+                📱 "Make an Instagram post for our summer promotion"
+              </button>
+              <button
+                onClick={() => {
+                  setTextInput('Generate a photo for the truffle pasta dish')
+                  setInputMode('text')
+                }}
+                className="text-left bg-stone-800/50 border border-stone-700 hover:border-amber-500/40 hover:bg-stone-800 rounded-xl px-4 py-3 text-stone-400 hover:text-stone-200 transition-all"
+              >
+                🍝 "Generate a photo for the truffle pasta dish"
+              </button>
+              <button
+                onClick={() => {
+                  setTextInput('Create a football pitch promotional image')
+                  setInputMode('text')
+                }}
+                className="text-left bg-stone-800/50 border border-stone-700 hover:border-amber-500/40 hover:bg-stone-800 rounded-xl px-4 py-3 text-stone-400 hover:text-stone-200 transition-all"
+              >
+                ⚽ "Create a football pitch promotional image"
+              </button>
+            </>
+          )}
         </div>
 
         <div className="w-full space-y-4">

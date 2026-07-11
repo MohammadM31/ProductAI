@@ -8,7 +8,8 @@ import {
   previewProjectMapping,
   getMyOutputs,
   debugImageContent,
-  debugAllOutputs
+  debugAllOutputs,
+  getPersonalizedSuggestions
 } from '../controllers/requestController.js'
 import { requireAuth } from '../middleware/auth.js'
 
@@ -30,6 +31,7 @@ router.post('/iterate', requireAuth, iterateRequest)
 router.post('/confirm', requireAuth, confirmOutput)
 router.post('/preview-project', requireAuth, previewProjectMapping)
 router.get('/my-outputs', requireAuth, getMyOutputs)
+router.get('/suggestions', requireAuth, getPersonalizedSuggestions)
 
 // Debug routes
 router.get('/debug-image/:output_id', requireAuth, debugImageContent)
