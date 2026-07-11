@@ -131,15 +131,20 @@ export async function generateImageWithReplicate(prompt, modelName = 'flux-schne
     
     if (modelName.startsWith('flux')) {
       input.image = referenceImage
-      // Adjust strength based on modification type
+      // Replicate's Flux img2img field is `prompt_strength`, NOT `strength`.
+      // Scale is 0 = keep the reference image as-is, 1 = ignore it completely.
+      // So LOWER values keep us close to the reference; higher values let the
+      // prompt override more of it. (Previously this used the wrong field name
+      // AND the wrong direction, which is why generations drifted away from
+      // the reference cup design instead of preserving it.)
       if (isModification) {
-        input.strength = 0.4
-        console.log('   Modification mode: strength 0.4 (preserve original structure)')
+        input.prompt_strength = 0.5
+        console.log('   Modification mode: prompt_strength 0.5 (apply the requested change, keep the rest close to reference)')
       } else {
-        input.strength = 0.85
-        console.log('   Replication mode: strength 0.85 (close to reference)')
+        input.prompt_strength = 0.25
+        console.log('   Replication mode: prompt_strength 0.25 (stay close to reference design)')
       }
-      input.guidance_scale = 7.5
+      input.guidance_scale = 3.5
     }
     
     if (modelName === 'sdxl') {

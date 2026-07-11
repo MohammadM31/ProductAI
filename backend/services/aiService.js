@@ -1,588 +1,450 @@
-import OpenAI from 'openai'
-import { config } from '../config/index.js'
-import { searchDocuments, indexDocument, getDocument } from './databaseService.js'
-import { v4 as uuidv4 } from 'uuid'
-import { generateImageWithReplicate, generateImageWithFallback } from './replicateService.js'
+import React, { useState, useEffect } from 'react'
+import { X, Save, Trash2, FolderOpen, Plus, Upload } from 'lucide-react'  // ✅ Added X
+import { adminApi } from '../../api/client'
+import toast from 'react-hot-toast'
 
-/*let openaiClient = null
-
-function getOpenAI() {
-  if (!openaiClient) {
-    openaiClient = new OpenAI({ apiKey: config.openai.apiKey })
-  }
-  return openaiClient
-}*/
-
-let deepseekClient = null
-
-function getDeepSeek() {
-  if (!deepseekClient) {
-    deepseekClient = new OpenAI({
-      apiKey: config.deepseek.apiKey,
-      baseURL: config.deepseek.baseURL || 'https://api.deepseek.com',
-    })
-  }
-  return deepseekClient
+const EMPTY_PROJECT = {
+  name: '',
+  description: '',
+  department_id: '',
+  output_type: 'image',
+  trigger_keywords: '',
+  system_prompt: '',
+  reference_criteria: '',
+  reference_images: [],
+  attached_files: [],
+  image_model: 'flux-schnell',
 }
 
+export default function ProjectEditor({ project, departments, onSave, onDelete, onClose }) {
+  const [form, setForm] = useState(EMPTY_PROJECT)
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const [uploadingFile, setUploadingFile] = useState(false)
+  const isNew = !project?.id
 
-// ============================================================
-// AI-Powered Project Mapping with Department Awareness
-// ============================================================
-export async function mapRequestToProject(requestText) {
-  const projects = await searchDocuments(config.indices.projects, {
-    query: { match_all: {} },
-    size: 50,
-  })
-
-  if (projects.length === 0) return null
-
-  if (projects.length === 1) {
-    console.log(`✅ Only one project exists: "${projects[0].name}"`)
-    return projects[0]
-  }
-
-  try {
-     //const openai = getOpenAI()
-    
-    const departments = await searchDocuments(config.indices.departments, {
-      query: { match_all: {} },
-      size: 50,
-    })
-    const deptMap = {}
-    departments.forEach(d => { deptMap[d.id] = d.name })
-
-    const projectList = projects.map(p => {
-      const deptName = deptMap[p.department_id] || 'Unassigned'
-      let info = `PROJECT ID: ${p.id}\n`
-      info += `Name: ${p.name}\n`
-      info += `Department: ${deptName}\n`
-      info += `Description: ${p.description || 'No description'}\n`
-      info += `Output Type: ${p.output_type || 'image'}\n`
-      
-      if (p.reference_criteria) {
-        info += `Style Guide: ${p.reference_criteria.substring(0, 200)}...\n`
-      }
-      
-      if (p.system_prompt) {
-        const promptSummary = p.system_prompt.substring(0, 150)
-        info += `Guidelines: ${promptSummary}...\n`
-      }
-      
-      return info
-    }).join('\n---\n')
-
-    const systemPrompt = `You are an intelligent project routing system. Your task is to analyze user requests and match them to the most appropriate project.
-
-CRITICAL RULES:
-1. Understand the user's INTENT and what they want to CREATE
-2. Consider the project's PURPOSE, not just keywords
-3. Pay attention to the DEPARTMENT context
-4. If multiple projects could work, pick the BEST fit based on INTENT
-5. Reply with ONLY the project ID - nothing else, no explanation
-
-AVAILABLE PROJECTS:
-${projectList}
-
-USER REQUEST: "${requestText}"
-
-Analyze what the user wants to create and which project best matches their intent. Reply with ONLY the project ID.`
-
-    /*const resp = await openai.chat.completions.create({
-      model: config.openai.model,*/
-      const deepseek = getDeepSeek()
-const resp = await deepseek.chat.completions.create({
-  model: config.deepseek.model || 'deepseek-chat',
-      max_tokens: 50,
-      temperature: 0.1,
-      messages: [
-        {
-          role: 'system',
-          content: systemPrompt,
-        },
-        {
-          role: 'user',
-          content: `Project ID:`
-        },
-      ],
-    })
-
-    const projectId = resp.choices[0].message.content.trim()
-    console.log(`🤖 AI suggested project ID: "${projectId}"`)
-    
-    const matchedProject = projects.find(p => p.id === projectId)
-    
-    if (matchedProject) {
-      const deptName = deptMap[matchedProject.department_id] || 'Unknown Department'
-      console.log(`✅ AI matched to: "${matchedProject.name}" (${deptName})`)
-      return matchedProject
+  useEffect(() => {
+    if (project) {
+      setForm({
+        name: project.name || '',
+        description: project.description || '',
+        department_id: project.department_id || '',
+        output_type: project.output_type || 'image',
+        trigger_keywords: project.trigger_keywords || '',
+        system_prompt: project.system_prompt || '',
+        reference_criteria: project.reference_criteria || '',
+        reference_images: Array.isArray(project.reference_images) ? project.reference_images : [],
+        attached_files: Array.isArray(project.attached_files) ? project.attached_files : [],
+        image_model: project.image_model || 'flux-schnell',
+      })
     }
+  }, [project])
 
-    console.log(`⚠️ AI returned invalid ID, using fallback`)
-    const fallbackMatch = await fallbackProjectMatch(requestText, projects, deptMap)
-    if (fallbackMatch) return fallbackMatch
-    
-    return projects[0]
+  const update = (key, val) => setForm(f => ({ ...f, [key]: val }))
 
-  } catch (err) {
-    console.error('❌ AI mapping failed:', err.message)
-    
-    console.log('🔄 Falling back to intelligent matching...')
-    const departments = await searchDocuments(config.indices.departments, {
-      query: { match_all: {} },
-      size: 50,
-    })
-    const deptMap = {}
-    departments.forEach(d => { deptMap[d.id] = d.name })
-    
-    const fallbackMatch = await fallbackProjectMatch(requestText, projects, deptMap)
-    if (fallbackMatch) return fallbackMatch
-    
-    console.log(`⚠️ No match found, using default: "${projects[0].name}"`)
-    return projects[0]
-  }
-}
-
-// ============================================================
-// Intelligent Fallback Matching
-// ============================================================
-async function fallbackProjectMatch(requestText, projects, deptMap) {
-  const lowerRequest = requestText.toLowerCase()
-  
-  const scored = projects.map(project => {
-    let score = 0
-    const keywords = (project.trigger_keywords || '').toLowerCase().split(/\s+/)
-    const description = (project.description || '').toLowerCase()
-    const name = (project.name || '').toLowerCase()
-    const criteria = (project.reference_criteria || '').toLowerCase()
-    
-    for (const kw of keywords) {
-      if (kw.length > 2 && lowerRequest.includes(kw)) {
-        score += 3
-      }
-    }
-    
-    const descWords = description.split(/\s+/)
-    for (const word of descWords) {
-      if (word.length > 3 && lowerRequest.includes(word)) {
-        score += 2
-      }
-    }
-    
-    const nameWords = name.split(/\s+/)
-    for (const word of nameWords) {
-      if (word.length > 3 && lowerRequest.includes(word)) {
-        score += 2
-      }
-    }
-    
-    const criteriaWords = criteria.split(/\s+/)
-    for (const word of criteriaWords) {
-      if (word.length > 4 && lowerRequest.includes(word)) {
-        score += 1
-      }
-    }
-    
-    return { project, score }
-  })
-  
-  scored.sort((a, b) => b.score - a.score)
-  const best = scored[0]
-  
-  if (best.score >= 3) {
-    const deptName = deptMap[best.project.department_id] || 'Unknown'
-    console.log(`✅ Fallback matched "${best.project.name}" (${deptName}) with score ${best.score}`)
-    return best.project
-  }
-  
-  return null
-}
-
-// ============================================================
-// Helper: Build System Prompt
-// ============================================================
-function buildSystemPrompt(project) {
-  let systemPrompt = project.system_prompt || ''
-  
-  if (project.attached_files && project.attached_files.length > 0) {
-    systemPrompt += '\n\n=== REFERENCE DOCUMENTS ===\n'
-    project.attached_files.forEach((file, index) => {
-      if (!file.content) return
-      
-      systemPrompt += `\n--- Document ${index + 1}: ${file.name} (${file.type}) ---\n`
-      
-      if (file.type && (file.type.includes('text') || file.type.includes('json') || file.type.includes('javascript'))) {
-        systemPrompt += `${file.content}\n`
-      } else if (file.type && file.type.includes('image')) {
-        systemPrompt += `[Image uploaded: ${file.name} - use as visual reference for style, composition, and quality]\n`
-      } else if (file.content) {
-        systemPrompt += `${file.content}\n`
-      }
-    })
-    systemPrompt += '\n=== END REFERENCE DOCUMENTS ===\n'
-  }
-  
-  if (project.reference_criteria) {
-    systemPrompt += `\n=== VISUAL REFERENCE CRITERIA ===\n${project.reference_criteria}\n=== END VISUAL REFERENCE CRITERIA ===\n`
-  }
-  
-  if (project.reference_images && project.reference_images.length > 0) {
-    systemPrompt += '\n=== REFERENCE IMAGES ===\n'
-    project.reference_images.forEach((img, i) => {
-      systemPrompt += `${i+1}. ${img.name}`
-      if (img.description) {
-        systemPrompt += ` - ${img.description}`
-      }
-      if (img.style_analysis) {
-        systemPrompt += `\n   Style: ${img.style_analysis}`
-      }
-      systemPrompt += '\n'
-    })
-    systemPrompt += '=== END REFERENCE IMAGES ===\n'
-  }
-  
-  return systemPrompt
-}
-
-// ============================================================
-// Generate Output
-// This platform generates images only — every project, regardless
-// of its stored output_type, produces an image.
-// ============================================================
-export async function generateOutput(userRequest, project) {
-  return generateImageOutput(userRequest, project)
-}
-
-// ============================================================
-// NEW: Detect which reference-image category a request belongs to
-// ============================================================
-async function detectImageCategory(userRequest, availableCategories) {
-  if (availableCategories.length <= 1) {
-    return availableCategories[0] || null
-  }
-
-  const deepseek = getDeepSeek()
-  try {
-    const resp = await deepseek.chat.completions.create({
-      model: config.deepseek.model || 'deepseek-chat',
-      max_tokens: 20,
-      temperature: 0,
-      messages: [
-        {
-          role: 'system',
-          content: `Classify the user's request into exactly one of these categories: ${availableCategories.join(', ')}. Reply with ONLY the category name, nothing else.`,
-        },
-        { role: 'user', content: userRequest },
-      ],
-    })
-    const category = resp.choices[0].message.content.trim().toLowerCase()
-    if (availableCategories.includes(category)) {
-      console.log(`🏷️ Detected category: "${category}"`)
-      return category
-    }
-  } catch (err) {
-    console.warn('⚠️ Category detection failed:', err.message)
-  }
-
-  // Fallback: simple keyword match
-  const lower = userRequest.toLowerCase()
-  const coldWords = ['iced', 'ice', 'cold', 'frozen', 'chilled']
-  const hotWords = ['hot', 'warm', 'steaming']
-  if (coldWords.some(w => lower.includes(w)) && availableCategories.includes('cold')) return 'cold'
-  if (hotWords.some(w => lower.includes(w)) && availableCategories.includes('hot')) return 'hot'
-  return availableCategories[0]
-}
-
-// ============================================================
-// Generate Image Output with Dynamic Vision Analysis
-// ============================================================
-async function generateImageOutput(userRequest, project) {
-  const deepseek = getDeepSeek() //const openai = getOpenAI()
-  const systemPrompt = buildSystemPrompt(project)
-
-  let referenceImageUrl = null
-  let imageDescription = ''
-  let matchedImages = []
-
-  // Get reference images for the matching category and analyze them dynamically
-  if (project.reference_images && project.reference_images.length > 0) {
-    const categories = [...new Set(
-      project.reference_images.map(img => (img.category || 'general').toLowerCase())
-    )]
-
-    const targetCategory = await detectImageCategory(userRequest, categories)
-
-    matchedImages = targetCategory
-      ? project.reference_images.filter(
-          img => (img.category || 'general').toLowerCase() === targetCategory
-        )
-      : project.reference_images
-
-    if (matchedImages.length === 0) {
-      matchedImages = project.reference_images
-    }
-
-    // Use the first matched image as the actual img2img input
-    referenceImageUrl = matchedImages[0].url
-
+  const analyzeImage = async (imageBase64) => {
     try {
-      console.log(`🖼️ Analyzing ${matchedImages.length} reference image(s) for category "${targetCategory}"...`)
-
-      const descriptions = await Promise.all(
-        matchedImages.map(img =>
-          Promise.race([
-            analyzeImageWithDeepSeek(img.url),
-            new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('Analysis timeout')), 10000)
-            ),
-          ]).catch(err => {
-            console.warn(`⚠️ Analysis failed for ${img.name}:`, err.message)
-            return 'Reference image provided. Match its style, colors, and composition.'
-          })
-        )
-      )
-
-      imageDescription = descriptions
-        .map((desc, i) => `Reference ${i + 1} (${matchedImages[i].name}): ${desc}`)
-        .join('\n\n')
-
-      console.log('📸 Combined reference understanding:', imageDescription.substring(0, 150) + '...')
-
+      const response = await adminApi.analyzeImage(imageBase64)
+      return response.analysis || ''
     } catch (err) {
-      console.warn('⚠️ Image analysis failed:', err.message)
-      imageDescription = 'Reference images provided. Match their style, colors, and composition.'
+      console.error('Image analysis failed:', err)
+      return ''
     }
   }
 
-  // Generate prompt using the dynamic analysis
-  /*const promptResponse = await openai.chat.completions.create({
-    model: config.openai.model,*/
-    const promptResponse = await deepseek.chat.completions.create({
-      model: config.deepseek.model || 'deepseek-chat',
-    max_tokens: 600,
-    messages: [
-      {
-        role: 'system',
-        content: `You are an image prompt generator.
-
-${systemPrompt}
-
-${imageDescription ? `
-REFERENCE IMAGE DESCRIPTION:
-${imageDescription}
-
-INSTRUCTIONS:
-- Use the reference image description above as your PRIMARY guide
-- If the user asks for changes, ONLY change what they ask for
-- Keep everything else exactly as described in the reference
-- If the user asks to remove something, remove it
-- If they ask to change something, change ONLY that thing
-` : ''}
-
-Generate a single, detailed image prompt. No extra text.`
-      },
-      {
-        role: 'user',
-        content: `User Request: "${userRequest}"
-
-${imageDescription ? `
-Based on the reference image description above, create a prompt that:
-1. Preserves the core elements (cup shape, text, design, etc.)
-2. ONLY modifies what the user requested
-3. Keeps everything else the same
-` : `
-Create a prompt based on the user's request.
-`}`
-      },
-    ],
-  })
-
-  const imagePrompt = promptResponse.choices[0].message.content.trim()
-  console.log('📝 Generated prompt:', imagePrompt)
-
-  const modelName = project.image_model || process.env.REPLICATE_IMAGE_MODEL || 'flux-schnell'
-  
-  try {
-    console.log(`🎨 Generating image with ${modelName}...`)
+  const handleImageUpload = async (e, refType) => {
+    const file = e.target.files[0]
+    if (!file) return
     
-    const result = await generateImageWithReplicate(
-      imagePrompt, 
-      modelName,
-      referenceImageUrl
-    )
-    
-    if (!result.url || typeof result.url !== 'string' || result.url === '{}' || result.url.length < 10) {
-      console.error('❌ Invalid image URL received:', result.url)
-      throw new Error('Invalid image URL received from Replicate')
-    }
-    
-    return {
-      output_type: 'image',
-      content: result.url,
-      dalle_prompt: imagePrompt,
-      model_used: modelName,
-      used_reference: !!referenceImageUrl,
-    }
-  } catch (err) {
-    console.error('❌ Replicate generation failed:', err.message)
-    
-    console.log('🔄 Trying fallback models...')
+    setUploadingImage(true)
     try {
-      const fallbackResult = await generateImageWithFallback(
-        imagePrompt,
-        ['flux-schnell', 'flux-dev', 'sdxl'],
-        referenceImageUrl
-      )
-      
-      if (!fallbackResult.url || typeof fallbackResult.url !== 'string' || fallbackResult.url === '{}') {
-        throw new Error('Invalid fallback image URL')
+      const reader = new FileReader()
+      reader.onloadend = async () => {
+        const base64 = reader.result
+        const analysis = await analyzeImage(base64)
+        
+        const newImage = {
+          id: Date.now().toString(),
+          name: file.name,
+          url: base64,
+          description: file.name,
+          style_analysis: analysis,
+          // 'product' = the actual item (e.g. the branded cup) — its design,
+          // logo, and shape must be preserved in generation.
+          // 'style' = a mood/vibe reference (e.g. a sample Instagram post) —
+          // only its colors, background, and composition energy should be
+          // borrowed, not its literal contents.
+          ref_type: refType,
+          category: 'general',
+        }
+        
+        setForm(f => ({
+          ...f,
+          reference_images: [...f.reference_images, newImage]
+        }))
+        toast.success('Reference image uploaded and analyzed')
       }
-      
-      return {
-        output_type: 'image',
-        content: fallbackResult.url,
-        dalle_prompt: imagePrompt,
-        model_used: fallbackResult.model,
-        fallback: true,
-        used_reference: !!referenceImageUrl,
-      }
-    } catch (fallbackErr) {
-      console.error('❌ All models failed:', fallbackErr.message)
-      throw new Error(`Image generation failed: ${fallbackErr.message}`)
+      reader.readAsDataURL(file)
+    } catch (err) {
+      toast.error('Failed to upload image')
+    } finally {
+      setUploadingImage(false)
     }
   }
-}
 
-// ============================================================
-// Generate Text Output
-// ============================================================
-async function generateTextOutput(userRequest, project) {
-  /*const openai = getOpenAI()
-  const systemPrompt = buildSystemPrompt(project)
-
-  const response = await openai.chat.completions.create({
-    model: config.openai.model,*/
-    const deepseek = getDeepSeek()
-    const systemPrompt = buildSystemPrompt(project)
-const response = await deepseek.chat.completions.create({
-  model: config.deepseek.model || 'deepseek-chat',
-    max_tokens: 1500,
-    messages: [
-      {
-        role: 'system',
-        content: systemPrompt,
-      },
-      {
-        role: 'user',
-        content: userRequest,
-      },
-    ],
-  })
-
-  return {
-    output_type: 'text',
-    content: response.choices[0].message.content,
+  const removeImage = (imageId) => {
+    setForm(f => ({
+      ...f,
+      reference_images: f.reference_images.filter(img => img.id !== imageId)
+    }))
   }
-}
 
-async function analyzeImageWithDeepSeek(imageData) {
-  const deepseek = getDeepSeek()
-  
-  try {
-    const response = await deepseek.chat.completions.create({
-      model: config.deepseek.visionModel || 'deepseek-vl',
-      max_tokens: 300,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: 'Describe this image in detail...',
-            },
-            {
-              type: 'image_url',
-              image_url: { url: imageData },
-            },
-          ],
-        },
-      ],
-    })
-    return response.choices[0].message.content
-  } catch (err) {
-    console.warn('⚠️ Image analysis failed:', err.message)
-    return 'Reference image for style guidance.'
+  const updateImageCategory = (imageId, category) => {
+    setForm(f => ({
+      ...f,
+      reference_images: f.reference_images.map(img =>
+        img.id === imageId ? { ...img, category } : img
+      )
+    }))
   }
-}
 
-// ============================================================
-// Iterate Output (revision)
-// This platform generates images only — iteration always re-renders
-// an image based on the accumulated feedback.
-// ============================================================
-export async function iterateOutput(originalRequest, feedback, previousContent, project) {
-  return generateImageOutput(`${originalRequest}. Modifications requested: ${feedback}`, project)
-}
-
-// ============================================================
-// Save Output
-// ============================================================
-export async function saveOutput({ sessionId, projectId, departmentId, outputType, content, originalRequest, requesterId, requesterName, requesterEmail }) {
-  const id = uuidv4()
-  const doc = {
-    id,
-    session_id: sessionId,
-    project_id: projectId,
-    department_id: departmentId,
-    output_type: outputType,
-    content: content || 'No content generated',
-    original_request: originalRequest || '',
-    status: 'pending_review',
-    created_at: new Date().toISOString(),
-    requester_id: requesterId || null,
-    requester_name: requesterName || null,
-    requester_email: requesterEmail || null,
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    
+    setUploadingFile(true)
+    try {
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        const content = reader.result
+        
+        const newFile = {
+          id: Date.now().toString(),
+          name: file.name,
+          type: file.type,
+          content: content,
+        }
+        
+        setForm(f => ({
+          ...f,
+          attached_files: [...f.attached_files, newFile]
+        }))
+        toast.success('File uploaded')
+      }
+      reader.readAsDataURL(file)
+    } catch (err) {
+      toast.error('Failed to upload file')
+    } finally {
+      setUploadingFile(false)
+    }
   }
-  console.log('💾 Saving output:', {
-    id,
-    requester_id: requesterId,
-    requester_name: requesterName,
-    requester_email: requesterEmail,
-    status: 'pending_review'
-  })
-  await indexDocument(config.indices.outputs, id, doc)
-  return doc
-}
 
-// ============================================================
-// Get All Outputs (Admin Inbox — every request, every department)
-// ============================================================
-export async function getAllOutputs() {
-  return searchDocuments(config.indices.outputs, {
-    query: { match_all: {} },
-    sort: [{ created_at: { order: 'desc' } }],
-    size: 200,
-  })
-}
+  const removeFile = (fileId) => {
+    setForm(f => ({
+      ...f,
+      attached_files: f.attached_files.filter(file => file.id !== fileId)
+    }))
+  }
 
-// ============================================================
-// Get Outputs by Department
-// ============================================================
-export async function getOutputsByDepartment(departmentId) {
-  return searchDocuments(config.indices.outputs, {
-    query: { term: { department_id: departmentId } },
-    sort: [{ created_at: { order: 'desc' } }],
-    size: 100,
-  })
-}
+  // ✅ Get department name for display
+  const getDepartmentName = () => {
+    if (!form.department_id) return 'No department'
+    const dept = departments.find(d => d.id === form.department_id)
+    return dept ? dept.name : 'Unknown department'
+  }
 
-// ============================================================
-// Get Outputs by Project
-// ============================================================
-export async function getOutputsByProject(projectId) {
-  return searchDocuments(config.indices.outputs, {
-    query: { term: { project_id: projectId } },
-    sort: [{ created_at: { order: 'desc' } }],
-    size: 100,
-  })
+  const handleSave = async () => {
+    if (!form.name.trim() || !form.department_id) {
+      toast.error('Name and department are required')
+      return
+    }
+    setSaving(true)
+    try {
+      let result
+      if (isNew) {
+        result = await adminApi.createProject(form)
+        toast.success('Project created')
+      } else {
+        result = await adminApi.updateProject(project.id, form)
+        toast.success('Project saved')
+      }
+      onSave(result.project)
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!confirm(`Delete project "${project.name}"? This cannot be undone.`)) return
+    setDeleting(true)
+    try {
+      await adminApi.deleteProject(project.id)
+      toast.success('Project deleted')
+      onDelete(project.id)
+    } catch (err) {
+      toast.error('Delete failed')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-stone-700 flex-shrink-0">
+        <h2 className="text-base font-semibold text-white">
+          {isNew ? 'New Project' : `Edit: ${project.name}`}
+        </h2>
+        <button onClick={onClose} className="p-2 rounded-lg hover:bg-stone-700 text-stone-400 hover:text-stone-200 transition-colors">
+          <X size={16} />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="col-span-2">
+            <label className="block text-xs font-medium text-stone-400 mb-1.5">Project Name *</label>
+            <input
+              value={form.name}
+              onChange={e => update('name', e.target.value)}
+              className="input-field"
+              placeholder="e.g. Menu Item Images"
+            />
+          </div>
+
+          <div className="col-span-2">
+            <label className="block text-xs font-medium text-stone-400 mb-1.5">
+              Image Generation Model
+              <span className="text-stone-600 font-normal ml-1">— Choose which AI model to use</span>
+            </label>
+            <select
+              value={form.image_model || 'flux-schnell'}
+              onChange={e => update('image_model', e.target.value)}
+              className="input-field"
+            >
+              <option value="flux-schnell">FLUX-Schnell (Cheapest, $0.003/image)</option>
+              <option value="flux-dev">FLUX-Dev (Good quality, $0.025/image)</option>
+              <option value="flux-1.1-pro">FLUX-1.1-Pro (Best quality, $0.04/image)</option>
+              <option value="sdxl">SDXL (Open source, ~$0.003-0.005/image)</option>
+              <option value="ideogram-v3-turbo">Ideogram v3 Turbo (Good for text, ~$0.04/image)</option>
+            </select>
+            <p className="text-xs text-stone-500 mt-1">Different models have different costs and quality levels</p>
+          </div>
+        </div>
+
+        <div className="border border-stone-700 rounded-xl p-4 bg-stone-900/50">
+          <label className="block text-xs font-medium text-stone-400 mb-3">
+            Product Reference Images
+            <span className="text-stone-600 font-normal ml-1">— the actual item (e.g. your branded cup). Its design, logo, and shape will be preserved when generating.</span>
+          </label>
+
+          <div className="flex items-center gap-3 mb-3">
+            <label className="cursor-pointer flex items-center gap-2 bg-stone-700 hover:bg-stone-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-colors">
+              <Upload size={14} />
+              {uploadingImage ? 'Uploading...' : 'Upload Product Image'}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={e => handleImageUpload(e, 'product')}
+                disabled={uploadingImage}
+                className="hidden"
+              />
+            </label>
+            <p className="text-xs text-stone-500">PNG, JPG, WebP (max 5MB)</p>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            {form.reference_images.filter(img => img.ref_type !== 'style').map((img) => (
+              <div key={img.id} className="relative group">
+                <img
+                  src={img.url}
+                  alt={img.name}
+                  className="w-full h-32 object-cover rounded-xl border border-stone-700"
+                />
+                <button
+                  onClick={() => removeImage(img.id)}
+                  className="absolute top-2 right-2 p-1 bg-red-500/80 hover:bg-red-500 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <X size={12} />
+                </button>
+                <p className="text-xs text-stone-400 mt-1 truncate">{img.name}</p>
+                <input
+                  value={img.category === 'general' ? '' : (img.category || '')}
+                  onChange={e => updateImageCategory(img.id, e.target.value || 'general')}
+                  placeholder="tag e.g. cold / hot"
+                  className="mt-1 w-full text-xs bg-stone-800 border border-stone-700 rounded-lg px-2 py-1 text-stone-300 placeholder-stone-600"
+                />
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-stone-600 mt-2">Optional tag: if a request mentions "iced"/"cold" vs "hot", tag images so the matching one is used as the base.</p>
+        </div>
+
+        <div className="border border-stone-700 rounded-xl p-4 bg-stone-900/50">
+          <label className="block text-xs font-medium text-stone-400 mb-3">
+            Style / Vibe Reference Images
+            <span className="text-stone-600 font-normal ml-1">— example posts showing the mood, background, colors, and typography for the final image. The product itself in these photos is NOT copied — only the vibe is.</span>
+          </label>
+
+          <div className="flex items-center gap-3 mb-3">
+            <label className="cursor-pointer flex items-center gap-2 bg-stone-700 hover:bg-stone-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-colors">
+              <Upload size={14} />
+              {uploadingImage ? 'Uploading...' : 'Upload Style Image'}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={e => handleImageUpload(e, 'style')}
+                disabled={uploadingImage}
+                className="hidden"
+              />
+            </label>
+            <p className="text-xs text-stone-500">PNG, JPG, WebP (max 5MB)</p>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            {form.reference_images.filter(img => img.ref_type === 'style').map((img) => (
+              <div key={img.id} className="relative group">
+                <img
+                  src={img.url}
+                  alt={img.name}
+                  className="w-full h-32 object-cover rounded-xl border border-stone-700"
+                />
+                <button
+                  onClick={() => removeImage(img.id)}
+                  className="absolute top-2 right-2 p-1 bg-red-500/80 hover:bg-red-500 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <X size={12} />
+                </button>
+                <p className="text-xs text-stone-400 mt-1 truncate">{img.name}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="border border-stone-700 rounded-xl p-4 bg-stone-900/50">
+          <label className="block text-xs font-medium text-stone-400 mb-3">
+            Attached Files (Documents)
+            <span className="text-stone-600 font-normal ml-1">— Upload PDF, Word, or text files with guidelines</span>
+          </label>
+          
+          <div className="flex items-center gap-3 mb-3">
+            <label className="cursor-pointer flex items-center gap-2 bg-stone-700 hover:bg-stone-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-colors">
+              <Plus size={14} />
+              {uploadingFile ? 'Uploading...' : 'Upload File'}
+              <input
+                type="file"
+                accept=".txt,.pdf,.doc,.docx,.json,.md"
+                onChange={handleFileUpload}
+                disabled={uploadingFile}
+                className="hidden"
+              />
+            </label>
+            <p className="text-xs text-stone-500">TXT, PDF, DOC, DOCX, JSON, MD</p>
+          </div>
+
+          <div className="space-y-2">
+            {form.attached_files.map((file) => (
+              <div key={file.id} className="flex items-center justify-between bg-stone-800 rounded-lg px-3 py-2">
+                <span className="text-sm text-stone-300 truncate">{file.name}</span>
+                <button
+                  onClick={() => removeFile(file.id)}
+                  className="p-1 hover:bg-stone-700 rounded text-stone-400 hover:text-red-400 transition-colors"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-stone-400 mb-1.5">
+            Reference Criteria / Visual Requirements
+            <span className="text-stone-600 font-normal ml-1">— Describe the style, composition, colors from the reference images</span>
+          </label>
+          <textarea
+            value={form.reference_criteria}
+            onChange={e => update('reference_criteria', e.target.value)}
+            rows={4}
+            className="input-field resize-none"
+            placeholder="Example: Images should follow the brand guidelines...
+- Warm, golden lighting like the reference photos
+- Plating style: Minimalist with fresh herbs on top
+- Color palette: Earth tones with green accents
+- Composition: 70% food, 30% negative space
+- Mood: Premium, inviting, rustic-elegant"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-stone-400 mb-1.5">Description</label>
+          <textarea
+            value={form.description}
+            onChange={e => update('description', e.target.value)}
+            rows={2}
+            className="input-field resize-none"
+            placeholder="Brief description of what this project handles…"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-stone-400 mb-1.5">
+            Trigger Keywords
+            <span className="text-stone-600 font-normal ml-1">— used to auto-match user requests</span>
+          </label>
+          <input
+            value={form.trigger_keywords}
+            onChange={e => update('trigger_keywords', e.target.value)}
+            className="input-field"
+            placeholder="menu food dish plate meal photo image…"
+          />
+          <p className="text-xs text-stone-600 mt-1">Space-separated keywords that signal this project.</p>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-stone-400 mb-1.5">
+            System Prompt / Output Criteria
+            <span className="text-stone-600 font-normal ml-1">— guidelines and brand rules for AI generation</span>
+          </label>
+          <textarea
+            value={form.system_prompt}
+            onChange={e => update('system_prompt', e.target.value)}
+            rows={10}
+            className="input-field resize-none font-mono text-xs leading-relaxed"
+            placeholder="You are a professional…&#10;&#10;BRAND GUIDELINES:&#10;- Style: …"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 px-6 py-4 border-t border-stone-700 flex-shrink-0">
+        {!isNew && (
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="flex items-center gap-2 text-rose-400 hover:text-rose-300 text-sm disabled:opacity-50 transition-colors"
+          >
+            <Trash2 size={14} />
+            {deleting ? 'Deleting…' : 'Delete'}
+          </button>
+        )}
+        <div className="flex-1" />
+        <button
+          onClick={onClose}
+          className="px-4 py-2 text-sm text-stone-400 hover:text-stone-200 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="flex items-center gap-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-stone-950 font-semibold text-sm px-5 py-2 rounded-xl transition-colors"
+        >
+          <Save size={14} />
+          {saving ? 'Saving…' : isNew ? 'Create Project' : 'Save Changes'}
+        </button>
+      </div>
+    </div>
+  )
 }
