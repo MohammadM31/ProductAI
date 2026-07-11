@@ -10,6 +10,7 @@ import { seedDemoData } from './services/authService.js'
 import authRoutes from './routes/auth.js'
 import requestRoutes from './routes/request.js'
 import adminRoutes from './routes/admin.js'
+import referenceImagesRoutes from './routes/referenceImages.js' // ADD THIS
 import { errorHandler, notFound } from './middleware/errorHandler.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -21,17 +22,12 @@ const app = express()
 // ✅ COMPLETE CORS FIX - Allow ALL origins for testing
 // ============================================================
 app.use(cors({
-  origin: '*', // Allow all origins (for testing)
+  origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   credentials: true,
   optionsSuccessStatus: 200
 }))
-// Note: no separate app.options('*', cors()) here — app.use(cors(...)) already
-// handles OPTIONS preflight requests on its own. A bare '*' route pattern is
-// also a known crash trigger with some path-to-regexp versions Express can
-// resolve to, which would silently prevent the whole server from booting
-// (explaining "no CORS header at all" — the request never reaches Express).
 
 app.use(express.json({ limit: '100mb' }))
 app.use(express.urlencoded({ extended: true, limit: '100mb' }))
@@ -53,7 +49,7 @@ app.get('/health', (req, res) => {
   })
 })
 
-// Root route - Fixes "GET /" error
+// Root route
 app.get('/', (req, res) => {
   res.json({
     message: '🎨 ProductAI API is running!',
@@ -68,7 +64,8 @@ app.get('/', (req, res) => {
       voiceRequest: '/api/request/voice (POST)',
       projects: '/api/admin/projects (GET)',
       departments: '/api/admin/departments (GET)',
-      inbox: '/api/admin/outputs (GET)'
+      inbox: '/api/admin/outputs (GET)',
+      referenceImages: '/api/reference-images/upload (POST - requires auth)'
     },
     docs: 'https://github.com/MohammadM31/ProductAI'
   })
@@ -78,6 +75,7 @@ app.get('/', (req, res) => {
 app.use('/api/auth', authRoutes)
 app.use('/api/request', requestRoutes)
 app.use('/api/admin', adminRoutes)
+app.use('/api/reference-images', referenceImagesRoutes) // ADD THIS
 
 // Error handling (must be last)
 app.use(notFound)
@@ -86,15 +84,21 @@ app.use(errorHandler)
 async function start() {
   console.log('🚀 Starting Creative Request Platform Backend…')
   
-  // Create uploads directory
-  const uploadDir = path.join(__dirname, 'uploads', 'images')
-  if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true })
-    console.log('📁 Created uploads directory:', uploadDir)
+  // Create uploads directories
+  const uploadDirs = [
+    path.join(__dirname, 'uploads', 'images'),
+    path.join(__dirname, 'uploads', 'reference_images'), // ADD THIS
+    path.join(__dirname, 'uploads', 'psd')
+  ]
+  
+  for (const dir of uploadDirs) {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true })
+      console.log('📁 Created uploads directory:', dir)
+    }
   }
   
   try {
-    // Force a timeout of 5 seconds for OpenSearch connection
     await Promise.race([
       initializeIndices(),
       new Promise((_, reject) => 
@@ -105,7 +109,6 @@ async function start() {
   } catch (err) {
     console.error('⚠️  OpenSearch unavailable:', err.message);
     console.log('ℹ️  Continuing startup without OpenSearch...');
-    // Don't exit - continue to start the server
   }
 
   const PORT = process.env.PORT || config.port || 10000
@@ -113,6 +116,7 @@ async function start() {
     console.log(`✅ Server running on port ${PORT} [${config.nodeEnv}]`)
     console.log(`   Health: /health`)
     console.log(`   Root: /`)
+    console.log(`   Reference Images: /api/reference-images`)
   })
 }
 

@@ -20,7 +20,6 @@ function getReplicate() {
   return replicateClient
 }
 
-// Function to download and save image locally
 async function downloadAndSaveImage(imageUrl, extension = 'png') {
   try {
     console.log('📥 Downloading image from:', imageUrl.substring(0, 80) + '...')
@@ -136,27 +135,39 @@ export async function generateImageWithReplicate(prompt, modelName = 'flux-schne
   const input = { ...configModel.input }
   input.prompt = prompt
   
-  // Detect if this is a modification request
   const isModification = prompt.includes('instead of') || 
                          prompt.includes('change') || 
                          prompt.includes('remove') ||
                          prompt.includes('without')
   
+  let useReference = false
+  
   if (referenceImage) {
-    console.log('🖼️ Using reference image for image generation')
+    console.log('🖼️ Reference image provided')
+    console.log(`   URL: ${referenceImage.substring(0, 100)}...`)
     
+    // Validate that the reference image is a valid HTTP URL
+    if (referenceImage.startsWith('http://') || referenceImage.startsWith('https://')) {
+      useReference = true
+      console.log('✅ Reference image is a valid HTTP URL')
+    } else if (referenceImage.startsWith('data:image')) {
+      console.warn('⚠️ Reference image is base64 data URL. Replicate requires a public URL.')
+      console.log('   Continuing with prompt-only generation...')
+    } else {
+      console.warn(`⚠️ Unknown reference image format: ${referenceImage.substring(0, 50)}...`)
+      console.log('   Continuing with prompt-only generation...')
+    }
+  }
+  
+  if (useReference) {
     if (modelName.startsWith('flux')) {
       input.image = referenceImage
-      // Replicate's Flux img2img field is `prompt_strength`, NOT `strength`.
-      // Scale is 0 = keep the reference image as-is, 1 = ignore it completely.
-      // So LOWER values keep us close to the reference; higher values let the
-      // prompt override more of it.
       if (isModification) {
-        input.prompt_strength = 0.4  // Changed from 0.5 to 0.4
-        console.log('   Modification mode: prompt_strength 0.4 (apply the requested change, keep the rest close to reference)')
+        input.prompt_strength = 0.4
+        console.log('   Modification mode: prompt_strength 0.4')
       } else {
-        input.prompt_strength = 0.15  // Changed from 0.25 to 0.15
-        console.log('   Replication mode: prompt_strength 0.15 (very close to reference)')
+        input.prompt_strength = 0.15
+        console.log('   Replication mode: prompt_strength 0.15')
       }
       input.guidance_scale = 3.5
     }
@@ -167,12 +178,12 @@ export async function generateImageWithReplicate(prompt, modelName = 'flux-schne
     }
 
     if (modelName.startsWith('recraft')) {
-      console.warn('⚠️ Recraft models don\'t support direct img2img reference locking yet (needs Recraft custom-style API). Reference is being used as a text description only — for exact product/logo preservation, use a flux-* model.')
+      console.warn('⚠️ Recraft models don\'t support direct img2img reference locking yet.')
     }
   }
   
   try {
-    console.log(`🎨 Generating with ${modelName}${referenceImage ? ' (with reference image)' : ''}...`)
+    console.log(`🎨 Generating with ${modelName}${useReference ? ' (with reference image)' : ' (prompt only)'}...`)
     
     const prediction = await replicate.predictions.create({
       version: configModel.version,
@@ -228,7 +239,7 @@ export async function generateImageWithReplicate(prompt, modelName = 'flux-schne
       success: true,
       url: localUrl,
       model: modelName,
-      used_reference: !!referenceImage,
+      used_reference: useReference,
     }
     
   } catch (err) {
@@ -238,7 +249,7 @@ export async function generateImageWithReplicate(prompt, modelName = 'flux-schne
 }
 
 // ============================================================
-// Background Removal (used by the PSD layering pipeline)
+// Background Removal
 // ============================================================
 export async function removeBackground(imageUrl) {
   const replicate = getReplicate()

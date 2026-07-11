@@ -4,6 +4,12 @@ import { searchDocuments, indexDocument, getDocument } from './databaseService.j
 import { v4 as uuidv4 } from 'uuid'
 import { generateImageWithReplicate, generateImageWithFallback } from './replicateService.js'
 import { buildLayeredPsd } from './psdService.js'
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 let deepseekClient = null
 
@@ -78,21 +84,33 @@ USER REQUEST: "${requestText}"
 Analyze what the user wants to create and which project best matches their intent. Reply with ONLY the project ID.`
 
     const deepseek = getDeepSeek()
-    const resp = await deepseek.chat.completions.create({
-      model: config.deepseek.model || 'deepseek-chat',
-      max_tokens: 50,
-      temperature: 0.1,
-      messages: [
-        {
-          role: 'system',
-          content: systemPrompt,
-        },
-        {
-          role: 'user',
-          content: `Project ID:`
-        },
-      ],
-    })
+    let resp
+    
+    try {
+      resp = await deepseek.chat.completions.create({
+        model: config.deepseek.model || 'deepseek-chat',
+        max_tokens: 50,
+        temperature: 0.1,
+        messages: [
+          {
+            role: 'system',
+            content: systemPrompt,
+          },
+          {
+            role: 'user',
+            content: `Project ID:`
+          },
+        ],
+      })
+    } catch (apiError) {
+      console.error('❌ DeepSeek API error:', apiError.message)
+      if (apiError.status === 402) {
+        console.log('⚠️ DeepSeek API requires payment. Using fallback matching.')
+      }
+      const fallbackMatch = await fallbackProjectMatch(requestText, projects, deptMap)
+      if (fallbackMatch) return fallbackMatch
+      return projects[0]
+    }
 
     const projectId = resp.choices[0].message.content.trim()
     console.log(`🤖 AI suggested project ID: "${projectId}"`)
@@ -235,7 +253,6 @@ function buildSystemPrompt(project) {
 // Generate Output
 // ============================================================
 export async function generateOutput(userRequest, project) {
-  // Fix: Ensure image generation for menu items and any image-type projects
   const outputType = project.output_type || 'image'
   
   if (outputType === 'image' || outputType === 'psd' || outputType === 'svg') {
@@ -272,13 +289,41 @@ async function detectImageCategory(userRequest, availableCategories) {
     console.warn('⚠️ Category detection failed:', err.message)
   }
 
-  // Fallback: simple keyword match
   const lower = userRequest.toLowerCase()
   const coldWords = ['iced', 'ice', 'cold', 'frozen', 'chilled']
   const hotWords = ['hot', 'warm', 'steaming']
   if (coldWords.some(w => lower.includes(w)) && availableCategories.includes('cold')) return 'cold'
   if (hotWords.some(w => lower.includes(w)) && availableCategories.includes('hot')) return 'hot'
   return availableCategories[0]
+}
+
+// ============================================================
+// Convert base64 image to public URL
+// ============================================================
+async function convertBase64ToPublicUrl(base64Data, filename = null) {
+  try {
+    const matches = base64Data.match(/^data:image\/(\w+);base64,(.+)$/)
+    if (!matches) return null
+    
+    const ext = matches[1] || 'png'
+    const data = matches[2]
+    const buffer = Buffer.from(data, 'base64')
+    
+    const uploadDir = path.join(__dirname, '..', 'uploads', 'reference_images')
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true })
+    }
+    
+    const name = filename || `${uuidv4()}.${ext}`
+    const filepath = path.join(uploadDir, name)
+    fs.writeFileSync(filepath, buffer)
+    
+    const publicUrl = `${process.env.PUBLIC_BASE_URL || 'http://localhost:5000'}/uploads/reference_images/${name}`
+    return publicUrl
+  } catch (err) {
+    console.error('❌ Failed to convert base64 image:', err.message)
+    return null
+  }
 }
 
 // ============================================================
@@ -294,9 +339,6 @@ async function generateImageOutput(userRequest, project) {
   let styleDescription = ''
 
   const allRefs = project.reference_images || []
-  // 'product' (or untagged, for backward compatibility) = the actual item —
-  // its design/logo/shape must be preserved via img2img.
-  // 'style' = mood/vibe example — describe it, but never use it as the img2img base.
   const productImages = allRefs.filter(img => img.ref_type !== 'style')
   const styleImages = allRefs.filter(img => img.ref_type === 'style')
 
@@ -317,16 +359,33 @@ async function generateImageOutput(userRequest, project) {
       matchedImages = productImages
     }
 
-    // Use the first matched PRODUCT image as the actual img2img input.
-    // Style images are never used as the img2img base — only their
-    // description informs the prompt (see styleDescription below).
-    referenceImageUrl = matchedImages[0].url
-    console.log(`📸 Using reference image: ${matchedImages[0].name}`)
-    console.log(`   URL: ${referenceImageUrl ? referenceImageUrl.substring(0, 80) + '...' : 'No URL'}`)
+    // CRITICAL FIX: Convert base64 data URL to a public URL
+    if (matchedImages[0] && matchedImages[0].url) {
+      const imageUrl = matchedImages[0].url
+      
+      if (imageUrl.startsWith('data:image')) {
+        console.log('🔄 Converting base64 reference image to public URL...')
+        const publicUrl = await convertBase64ToPublicUrl(
+          imageUrl, 
+          matchedImages[0].name || `ref_${uuidv4()}.png`
+        )
+        if (publicUrl) {
+          referenceImageUrl = publicUrl
+          console.log(`✅ Saved reference image to public URL: ${referenceImageUrl}`)
+        } else {
+          console.log('⚠️ Failed to convert base64, using prompt-only generation')
+        }
+      } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+        referenceImageUrl = imageUrl
+        console.log(`📸 Using reference image URL: ${referenceImageUrl.substring(0, 80)}...`)
+      } else {
+        console.log(`⚠️ Unknown reference image format: ${imageUrl.substring(0, 50)}...`)
+      }
+    }
 
-    // Analyze ALL matched product images and combine descriptions
+    // Analyze ALL matched product images
     try {
-      console.log(`🖼️ Analyzing ${matchedImages.length} product reference image(s) for category "${targetCategory}"...`)
+      console.log(`🖼️ Analyzing ${matchedImages.length} product reference image(s)...`)
       const descriptions = await Promise.all(
         matchedImages.map(img => analyzeImageWithDeepSeek(img.url))
       )
@@ -356,56 +415,68 @@ async function generateImageOutput(userRequest, project) {
     }
   }
 
-  // Generate prompt using the dynamic analysis
-  const promptResponse = await deepseek.chat.completions.create({
-    model: config.deepseek.model || 'deepseek-chat',
-    max_tokens: 600,
-    messages: [
-      {
-        role: 'system',
-        content: `You are an image prompt generator.
+  // Generate prompt
+  let promptResponse
+  try {
+    promptResponse = await deepseek.chat.completions.create({
+      model: config.deepseek.model || 'deepseek-chat',
+      max_tokens: 600,
+      messages: [
+        {
+          role: 'system',
+          content: `You are an image prompt generator.
 
 ${systemPrompt}
 
 ${imageDescription ? `
-REFERENCE IMAGE DESCRIPTION (the product/cup — its design must be preserved exactly):
+REFERENCE IMAGE DESCRIPTION (the product — its design must be preserved exactly):
 ${imageDescription}
 
 INSTRUCTIONS:
-- Use the reference image description above as your PRIMARY guide for the product itself (shape, branding, logo, text, colors of the cup)
+- Use the reference image description above as your PRIMARY guide for the product itself
 - If the user asks for changes, ONLY change what they ask for
 - Keep everything else about the product exactly as described in the reference
-- If the user asks to remove something, remove it
-- If they ask to change something, change ONLY that thing
 ` : ''}
 
 ${styleDescription ? `
-STYLE / VIBE REFERENCE (mood board — describes the FEEL of the shot, not the product):
+STYLE / VIBE REFERENCE (mood board — describes the FEEL of the shot):
 ${styleDescription}
 
 INSTRUCTIONS:
-- Borrow ONLY the mood, background setting, lighting, color palette, composition energy, and any headline/typography treatment from this style reference
-- Do NOT copy any product, brand, or logo shown in the style reference — that content belongs to a different, unrelated example
-- Apply this vibe around and behind the actual product from the reference image description above
+- Borrow ONLY the mood, background setting, lighting, and color palette from this style reference
+- Do NOT copy any product shown in the style reference
 ` : ''}
 
 Generate a single, detailed image prompt. No extra text.`
-      },
-      {
-        role: 'user',
-        content: `User Request: "${userRequest}"
+        },
+        {
+          role: 'user',
+          content: `User Request: "${userRequest}"
 
 ${imageDescription ? `
 Based on the reference image description above, create a prompt that:
-1. Preserves the core elements (cup shape, text, design, etc.)
+1. Preserves the core elements from the reference
 2. ONLY modifies what the user requested
 3. Keeps everything else the same
-${styleDescription ? '4. Wraps the product in the mood/background/composition described in the STYLE / VIBE REFERENCE\n' : ''}` : `
+${styleDescription ? '4. Wraps the product in the mood/background described in the STYLE / VIBE REFERENCE\n' : ''}` : `
 Create a prompt based on the user's request.
 `}`
-      },
-    ],
-  })
+        },
+      ],
+    })
+  } catch (apiError) {
+    console.error('❌ Prompt generation API error:', apiError.message)
+    if (apiError.status === 402) {
+      return {
+        output_type: 'image',
+        content: '/uploads/images/fallback-placeholder.png',
+        dalle_prompt: userRequest,
+        model_used: 'fallback',
+        error: 'AI service unavailable'
+      }
+    }
+    throw apiError
+  }
 
   const imagePrompt = promptResponse.choices[0].message.content.trim()
   console.log('📝 Generated prompt:', imagePrompt)
@@ -415,6 +486,7 @@ Create a prompt based on the user's request.
 
   try {
     console.log(`🎨 Generating image with ${modelName}...`)
+    console.log(`   Reference image: ${referenceImageUrl || 'None'}`)
     
     const result = await generateImageWithReplicate(
       imagePrompt, 
@@ -468,7 +540,7 @@ Create a prompt based on the user's request.
 }
 
 // ============================================================
-// Finalize an image result: tag SVG output, or kick off PSD layering
+// Finalize an image result
 // ============================================================
 async function finalizeImageOutput({ project, imageUrl, imagePrompt, modelName, isSvgModel, referenceImageUrl, fallback }) {
   const base = {
@@ -509,24 +581,35 @@ async function generateTextOutput(userRequest, project) {
   const deepseek = getDeepSeek()
   const systemPrompt = buildSystemPrompt(project)
 
-  const response = await deepseek.chat.completions.create({
-    model: config.deepseek.model || 'deepseek-chat',
-    max_tokens: 1500,
-    messages: [
-      {
-        role: 'system',
-        content: systemPrompt,
-      },
-      {
-        role: 'user',
-        content: userRequest,
-      },
-    ],
-  })
+  try {
+    const response = await deepseek.chat.completions.create({
+      model: config.deepseek.model || 'deepseek-chat',
+      max_tokens: 1500,
+      messages: [
+        {
+          role: 'system',
+          content: systemPrompt,
+        },
+        {
+          role: 'user',
+          content: userRequest,
+        },
+      ],
+    })
 
-  return {
-    output_type: 'text',
-    content: response.choices[0].message.content,
+    return {
+      output_type: 'text',
+      content: response.choices[0].message.content,
+    }
+  } catch (apiError) {
+    console.error('❌ Text generation API error:', apiError.message)
+    if (apiError.status === 402) {
+      return {
+        output_type: 'text',
+        content: `I understand you want to: "${userRequest}". However, the AI service is currently unavailable. Please try again later or contact your administrator.`,
+      }
+    }
+    throw apiError
   }
 }
 
@@ -534,6 +617,14 @@ async function analyzeImageWithDeepSeek(imageData) {
   const deepseek = getDeepSeek()
   
   try {
+    let imageUrl = imageData
+    
+    // If it's a base64 data URL, use it directly
+    if (imageData.startsWith('data:image')) {
+      // DeepSeek can handle base64 data URLs
+      imageUrl = imageData
+    }
+    
     const response = await deepseek.chat.completions.create({
       model: config.deepseek.visionModel || 'deepseek-vl',
       max_tokens: 300,
@@ -543,11 +634,11 @@ async function analyzeImageWithDeepSeek(imageData) {
           content: [
             {
               type: 'text',
-              text: 'Describe this image in detail...',
+              text: 'Describe this image in detail including colors, composition, style, mood, and key elements:',
             },
             {
               type: 'image_url',
-              image_url: { url: imageData },
+              image_url: { url: imageUrl },
             },
           ],
         },
@@ -624,7 +715,7 @@ export async function saveOutput({ sessionId, projectId, departmentId, outputTyp
 }
 
 // ============================================================
-// Get All Outputs (across every department/project — admin view)
+// Get All Outputs
 // ============================================================
 export async function getAllOutputs() {
   return searchDocuments(config.indices.outputs, {
@@ -634,9 +725,6 @@ export async function getAllOutputs() {
   })
 }
 
-// ============================================================
-// Get Outputs by Department
-// ============================================================
 export async function getOutputsByDepartment(departmentId) {
   return searchDocuments(config.indices.outputs, {
     query: { term: { department_id: departmentId } },
@@ -645,13 +733,54 @@ export async function getOutputsByDepartment(departmentId) {
   })
 }
 
-// ============================================================
-// Get Outputs by Project
-// ============================================================
 export async function getOutputsByProject(projectId) {
   return searchDocuments(config.indices.outputs, {
     query: { term: { project_id: projectId } },
     sort: [{ created_at: { order: 'desc' } }],
     size: 100,
   })
+}
+
+// ============================================================
+// Quick mapping for fallback
+// ============================================================
+export async function quickMapRequest(requestText) {
+  const projects = await searchDocuments(config.indices.projects, {
+    query: { match_all: {} },
+    size: 50,
+  })
+  
+  if (projects.length === 0) return null
+  if (projects.length === 1) return projects[0]
+  
+  const lowerRequest = requestText.toLowerCase()
+  
+  const scored = projects.map(project => {
+    let score = 0
+    const keywords = (project.trigger_keywords || '').toLowerCase().split(/\s+/)
+    const name = (project.name || '').toLowerCase()
+    
+    for (const kw of keywords) {
+      if (kw.length > 2 && lowerRequest.includes(kw)) {
+        score += 3
+      }
+    }
+    
+    const nameWords = name.split(/\s+/)
+    for (const word of nameWords) {
+      if (word.length > 3 && lowerRequest.includes(word)) {
+        score += 2
+      }
+    }
+    
+    return { project, score }
+  })
+  
+  scored.sort((a, b) => b.score - a.score)
+  
+  if (scored[0].score >= 2) {
+    return scored[0].project
+  }
+  
+  return projects[0]
 }

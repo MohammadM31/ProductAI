@@ -5,6 +5,7 @@ import {
   generateOutput,
   iterateOutput,
   saveOutput,
+  quickMapRequest,
 } from '../services/aiService.js'
 import { getProjectById } from '../services/projectService.js'
 import {
@@ -41,13 +42,9 @@ export async function processText(req, res) {
   return processRequest(res, text, sessionId, project_id, req.user)
 }
 
-// ============================================================
-// Process Request with Department Info
-// ============================================================
 async function processRequest(res, userText, sessionId, hintProjectId, user) {
   let project = null
   
-  // Check if project hint provided
   if (hintProjectId) {
     project = await getProjectById(hintProjectId)
     if (project) {
@@ -55,10 +52,14 @@ async function processRequest(res, userText, sessionId, hintProjectId, user) {
     }
   }
   
-  // If no hint or hint invalid, use AI mapping
   if (!project) {
     console.log(`🤖 Using AI to map request: "${userText}"`)
-    project = await mapRequestToProject(userText)
+    try {
+      project = await mapRequestToProject(userText)
+    } catch (err) {
+      console.log('⚠️ AI mapping failed, using quick mapping')
+      project = await quickMapRequest(userText)
+    }
   }
 
   if (!project) {
@@ -67,7 +68,6 @@ async function processRequest(res, userText, sessionId, hintProjectId, user) {
     })
   }
 
-  // Get Department Info for Response
   let departmentName = 'Unassigned'
   let department = null
   try {
@@ -83,15 +83,12 @@ async function processRequest(res, userText, sessionId, hintProjectId, user) {
   console.log(`   Department: ${departmentName}`)
   console.log(`   Output Type: ${project.output_type}`)
 
-  // Track user request for personalization
   if (user && user.id) {
     await trackUserRequest(user.id, project.id, userText)
   }
 
-  // Generate the output
   const result = await generateOutput(userText, project)
 
-  // Save the output with requester info
   const saved = await saveOutput({
     sessionId,
     projectId: project.id,
@@ -135,7 +132,6 @@ export async function iterateRequest(req, res) {
     return res.status(404).json({ error: 'Output not found' })
   }
 
-  // Check if the user owns this output or is admin/dept_user
   const user = req.user
   if (user.role === 'requester' && existing.requester_id !== user.id) {
     return res.status(403).json({ error: 'You can only iterate on your own outputs' })
@@ -153,7 +149,6 @@ export async function iterateRequest(req, res) {
     project
   )
 
-  // Track iteration as a new request for personalization
   if (user && user.id) {
     await trackUserRequest(user.id, project.id, `${existing.original_request} [Revision: ${feedback}]`)
   }
@@ -240,42 +235,44 @@ export async function previewProjectMapping(req, res) {
     return res.status(400).json({ error: 'No text provided' })
   }
 
-  const project = await mapRequestToProject(text)
-  if (!project) {
-    return res.status(404).json({ error: 'No matching project found' })
-  }
-
-  // Get department info
-  let departmentName = 'Unassigned'
   try {
-    const department = await getDocument(config.indices.departments, project.department_id)
-    if (department) {
-      departmentName = department.name
+    const project = await mapRequestToProject(text)
+    if (!project) {
+      return res.status(404).json({ error: 'No matching project found' })
     }
-  } catch (err) {
-    // Department not found, continue
-  }
 
-  return res.json({
-    project: {
-      id: project.id,
-      name: project.name,
-      description: project.description,
-      department: departmentName,
-      department_id: project.department_id,
-      system_prompt: project.system_prompt,
-      reference_criteria: project.reference_criteria,
-      reference_images: (project.reference_images || []).map(img => ({
-        name: img.name,
-        url: img.url,
-        description: img.description,
-      })),
-      attached_files: (project.attached_files || []).map(file => ({
-        name: file.name,
-        type: file.type,
-      })),
-    }
-  })
+    let departmentName = 'Unassigned'
+    try {
+      const department = await getDocument(config.indices.departments, project.department_id)
+      if (department) {
+        departmentName = department.name
+      }
+    } catch (err) {}
+
+    return res.json({
+      project: {
+        id: project.id,
+        name: project.name,
+        description: project.description,
+        department: departmentName,
+        department_id: project.department_id,
+        system_prompt: project.system_prompt,
+        reference_criteria: project.reference_criteria,
+        reference_images: (project.reference_images || []).map(img => ({
+          name: img.name,
+          url: img.url,
+          description: img.description,
+        })),
+        attached_files: (project.attached_files || []).map(file => ({
+          name: file.name,
+          type: file.type,
+        })),
+      }
+    })
+  } catch (err) {
+    console.error('Preview mapping error:', err)
+    return res.status(500).json({ error: 'Failed to map request' })
+  }
 }
 
 export async function getMyOutputs(req, res) {
@@ -295,9 +292,6 @@ export async function getMyOutputs(req, res) {
     const myOutputs = allOutputs.filter(out => {
       const isMine = out.requester_id === user.id
       const isConfirmed = out.status === 'confirmed' || out.status === 'sent_to_dept'
-      if (out.requester_id) {
-        console.log(`  - Output ${out.id}: requester_id=${out.requester_id}, isMine=${isMine}, status=${out.status}`)
-      }
       return isMine && isConfirmed
     })
     
@@ -321,7 +315,6 @@ export async function getPersonalizedSuggestions(req, res) {
   }
 }
 
-// Debug routes
 export async function debugImageContent(req, res) {
   const { output_id } = req.params
   

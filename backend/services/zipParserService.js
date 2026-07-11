@@ -1,16 +1,18 @@
-// backend/services/zipParserService.js
 import AdmZip from 'adm-zip'
 import { config } from '../config/index.js'
 import { v4 as uuidv4 } from 'uuid'
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 export async function parseGuidelinesZip(zipBuffer) {
   const zip = new AdmZip(zipBuffer)
   const entries = zip.getEntries()
   
-  // Build the directory tree with content
   const tree = buildDirectoryTreeWithContent(entries)
-  
-  // Extract and process files without AI
   const result = await extractAndProcessFiles(tree, entries)
   
   return result
@@ -54,17 +56,41 @@ function buildDirectoryTreeWithContent(entries) {
   return tree
 }
 
+async function processImageToFile(entry, categoryName) {
+  try {
+    const data = entry.getData()
+    const ext = entry.entryName.split('.').pop().toLowerCase()
+    const filename = `${uuidv4()}.${ext}`
+    
+    const uploadDir = path.join(__dirname, '..', 'uploads', 'reference_images')
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true })
+    }
+    
+    const filepath = path.join(uploadDir, filename)
+    fs.writeFileSync(filepath, data)
+    
+    const publicUrl = `${process.env.PUBLIC_BASE_URL || 'http://localhost:5000'}/uploads/reference_images/${filename}`
+    
+    return {
+      id: uuidv4(),
+      name: entry.entryName.split('/').pop(),
+      url: publicUrl,
+      description: `Sample image for ${categoryName}`,
+      category: categoryName,
+      ref_type: 'product'
+    }
+  } catch (err) {
+    console.warn(`Failed to process image ${entry.entryName}:`, err.message)
+    return null
+  }
+}
+
 async function extractAndProcessFiles(tree, entries) {
   const result = { projects: [] }
   
-  // Helper to recursively traverse the tree
   function traverse(node, path = []) {
-    // If we have files and we're at a leaf node
     if (node.files && node.files.length > 0 && Object.keys(node.children).length === 0) {
-      // Category and requestType are always counted from the bottom
-      // (closest to the files). Department is always the top-level
-      // folder, regardless of how many organizational folders sit
-      // in between (e.g. "business/request types/business report/annual report/").
       const categoryName = path[path.length - 1] || 'Uncategorized'
       const requestType = path[path.length - 2] || 'General'
       const department = path[0] || 'Marketing Department'
@@ -81,7 +107,6 @@ async function extractAndProcessFiles(tree, entries) {
         attached_files: []
       }
       
-      // Process files in this folder
       for (const fileInfo of node.files) {
         const entry = entries.find(e => e.entryName === fileInfo.fullPath)
         if (!entry) continue
@@ -92,7 +117,6 @@ async function extractAndProcessFiles(tree, entries) {
             const textContent = extractTextFromDocx(content)
             
             if (textContent && textContent.length > 10) {
-              // Store as attached file
               project.attached_files.push({
                 id: uuidv4(),
                 name: fileInfo.name,
@@ -100,9 +124,6 @@ async function extractAndProcessFiles(tree, entries) {
                 content: textContent
               })
 
-              // If the file name signals it's a style/brand guideline, also feed
-              // it directly into reference_criteria so it's used as generation
-              // guidance, not just kept as a passive attachment.
               if (/guideline|guidance|style|brand/i.test(fileInfo.name)) {
                 project.reference_criteria += (project.reference_criteria ? '\n\n' : '') +
                   `[From ${fileInfo.name}]\n${textContent}`
@@ -115,30 +136,21 @@ async function extractAndProcessFiles(tree, entries) {
         
         if (fileInfo.isImage) {
           try {
-            const data = entry.getData()
-            const base64Data = data.toString('base64')
-            const mimeType = getMimeType(fileInfo.name)
-            
-            project.reference_images.push({
-              id: uuidv4(),
-              name: fileInfo.name,
-              url: `data:${mimeType};base64,${base64Data}`,
-              description: `Sample image for ${categoryName} - ${fileInfo.name}`,
-              category: categoryName
-            })
+            const imageData = await processImageToFile(entry, categoryName)
+            if (imageData) {
+              project.reference_images.push(imageData)
+            }
           } catch (err) {
             console.warn(`Failed to process image ${fileInfo.name}:`, err.message)
           }
         }
       }
       
-      // Only add if there's content
       if (project.reference_images.length > 0 || project.attached_files.length > 0) {
         result.projects.push(project)
       }
     }
     
-    // Recursively traverse children
     for (const [name, child] of Object.entries(node.children || {})) {
       traverse(child, [...path, name])
     }
@@ -163,7 +175,6 @@ function getMimeType(fileName) {
 
 function extractTextFromDocx(content) {
   try {
-    // Simple text extraction from DOCX
     const text = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
     return text || 'No text content found'
   } catch (err) {

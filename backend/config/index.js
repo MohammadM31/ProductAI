@@ -3,7 +3,6 @@ import { readFileSync, existsSync } from 'fs'
 
 let caCert = null
 
-// Try to load CA certificate from file path
 const certPath = process.env.OPENSEARCH_CA_CERT_PATH
 if (certPath && existsSync(certPath)) {
   try {
@@ -14,7 +13,6 @@ if (certPath && existsSync(certPath)) {
   }
 }
 
-// Alternative: Load CA certificate from environment variable
 if (!caCert && process.env.OPENSEARCH_CA_CERT) {
   try {
     caCert = process.env.OPENSEARCH_CA_CERT
@@ -29,6 +27,7 @@ export const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   isDev: process.env.NODE_ENV !== 'production',
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
+  publicBaseUrl: process.env.PUBLIC_BASE_URL || 'http://localhost:5000',
 
   deepseek: {
     apiKey: process.env.DEEPSEEK_API_KEY || '',
@@ -68,7 +67,6 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || 'change-me-in-production-secret-key',
 }
 
-// Log OpenSearch config (without password)
 console.log('🔌 OpenSearch Configuration:', {
   host: config.opensearch.host,
   port: config.opensearch.port,
