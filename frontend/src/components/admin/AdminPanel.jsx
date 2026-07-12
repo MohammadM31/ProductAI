@@ -69,19 +69,16 @@ export default function AdminPanel() {
   }, [])
 
   // ============================================================
-  // FIXED: loadData - Handles lightweight projects
+  // loadData - Handles ultra-light projects
   // ============================================================
   const loadData = async () => {
     setLoading(true)
     try {
-      // Always load projects (works for both admin and department users)
       const pData = await adminApi.listProjects()
       console.log('📋 Projects loaded:', pData.projects)
       
-      // Store the lightweight projects
       setProjects(pData.projects || [])
       
-      // ONLY load departments if user is admin
       if (isAdmin) {
         try {
           const dData = await adminApi.listDepartments()
@@ -92,9 +89,7 @@ export default function AdminPanel() {
           setDepartments([])
         }
       } else {
-        // For department users, create a virtual department from their user info
         if (user?.department_id) {
-          // Try to find the department name from projects
           const deptProjects = (pData.projects || []).filter(p => p.department_id === user.department_id)
           const deptName = deptProjects.length > 0 
             ? deptProjects[0].department_name || 'My Department' 
@@ -111,7 +106,7 @@ export default function AdminPanel() {
         }
       }
       
-      console.log(`✅ Loaded ${pData.projects.length} projects (lightweight)`)
+      console.log(`✅ Loaded ${pData.projects.length} projects`)
     } catch (err) {
       console.error('Failed to load data:', err)
       toast.error('Failed to load data')
@@ -251,18 +246,16 @@ export default function AdminPanel() {
   }
 
   // ============================================================
-  // FIXED: openEdit - Fetches full project data for editing
+  // openEdit - Fetches full project data for editing
   // ============================================================
   const openEdit = async (project) => {
     try {
-      // Fetch the full project data for editing
       console.log('📋 Fetching full project data for:', project.id)
       const fullProject = await adminApi.getProject(project.id)
       setEditing(fullProject.project)
       setShowEditor(true)
     } catch (err) {
       console.error('Failed to load full project:', err)
-      // Fallback to the light version we have
       setEditing(project)
       setShowEditor(true)
     }
@@ -279,13 +272,11 @@ export default function AdminPanel() {
   }
 
   // ============================================================
-  // FIXED: handleDelete - Proper delete with confirmation
+  // handleDelete - Proper delete with confirmation
   // ============================================================
   const handleDelete = async (id) => {
-    // Prevent multiple clicks
     if (isDeleting) return
     
-    // Confirm with user
     if (!confirm('Delete this project? This will permanently remove it and all associated outputs. This cannot be undone!')) {
       return
     }
@@ -294,30 +285,22 @@ export default function AdminPanel() {
     setIsDeleting(true)
     
     try {
-      // Call the API to delete
-      const response = await adminApi.deleteProject(id)
-      console.log('✅ Delete response:', response)
+      await adminApi.deleteProject(id)
+      console.log('✅ Project deleted')
       
-      // Update local state immediately
       setProjects(prev => {
         const updated = prev.filter(p => p.id !== id)
         console.log('📋 Projects remaining:', updated.length)
         return updated
       })
       
-      // Close the editor
       setShowEditor(false)
       setEditing(null)
       
       toast.success('Project deleted successfully!')
     } catch (err) {
       console.error('❌ Delete error:', err)
-      console.error('❌ Error response:', err.response?.data)
-      
-      // Show error message
       toast.error(err.response?.data?.error || 'Failed to delete project')
-      
-      // Reload to ensure UI matches server state
       await loadData()
     } finally {
       setIsDeleting(false)
@@ -438,12 +421,10 @@ export default function AdminPanel() {
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm text-stone-200 truncate">{project.name}</p>
-                              <p className="text-xs text-stone-500 truncate">{project.description}</p>
-                              {project.reference_image_count > 0 && (
-                                <span className="text-xs text-stone-500">
-                                  📷 {project.reference_image_count} images
-                                </span>
-                              )}
+                              <p className="text-xs text-stone-500 truncate">
+                                {project.reference_count || 0} reference images
+                                {project.has_base64 && ' ⚠️ Base64 images'}
+                              </p>
                             </div>
                             <ChevronRight size={14} className="text-stone-600 flex-shrink-0" />
                           </button>
@@ -476,7 +457,9 @@ export default function AdminPanel() {
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm text-stone-200 truncate">{project.name}</p>
-                            <p className="text-xs text-stone-500 truncate">{project.description}</p>
+                            <p className="text-xs text-stone-500 truncate">
+                              {project.reference_count || 0} reference images
+                            </p>
                           </div>
                           <ChevronRight size={14} className="text-stone-600 flex-shrink-0" />
                         </button>

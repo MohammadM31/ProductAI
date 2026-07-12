@@ -178,12 +178,13 @@ function findByFuzzyName(list, targetName) {
 }
 
 // ============================================================
-// FIXED: listProjects - Returns lightweight data for fast loading
+// ULTRA LIGHT - listProjects returns minimal data for fast loading
 // ============================================================
 export async function listProjects(req, res) {
   try {
+    console.log('🔍 listProjects called (ultra-light)')
     const { role, department_id, id: userId } = req.user
-    console.log('📋 Listing projects for user:', { role, department_id, userId })
+    console.log('📋 User info:', { role, department_id, userId })
     
     let projects = []
     
@@ -196,60 +197,43 @@ export async function listProjects(req, res) {
         return res.status(400).json({ error: 'Department user has no department assigned' })
       }
       projects = await getProjectsByDepartment(department_id)
-      console.log(`📋 Department user found ${projects.length} projects for department ${department_id}`)
+      console.log(`📋 Department user found ${projects.length} projects`)
     } else {
       projects = []
       console.log('📋 Requester sees no projects')
     }
     
     // ============================================================
-    // STRIP HEAVY DATA - Only return what's needed for the list
+    // ULTRA LIGHT - ONLY WHAT THE LIST NEEDS
     // ============================================================
-    const lightProjects = projects.map(project => {
-      // Check if reference images contain base64 data
-      let hasBase64Images = false
-      let previewImage = null
-      let referenceImageCount = 0
-      
-      if (Array.isArray(project.reference_images)) {
-        referenceImageCount = project.reference_images.length
-        // Check if any image is base64
-        hasBase64Images = project.reference_images.some(img => 
-          img.url && img.url.startsWith('data:image')
-        )
-        // Get first non-base64 image for preview
-        if (!hasBase64Images && project.reference_images.length > 0) {
-          previewImage = project.reference_images[0].url || null
-        }
-      }
-      
-      return {
-        id: project.id,
-        name: project.name,
-        description: project.description,
-        department_id: project.department_id,
-        output_type: project.output_type || 'image',
-        trigger_keywords: project.trigger_keywords || '',
-        image_model: project.image_model || 'flux-schnell',
-        created_at: project.created_at,
-        updated_at: project.updated_at,
-        created_by: project.created_by,
-        // Counts instead of full data
-        reference_image_count: referenceImageCount,
-        attached_file_count: Array.isArray(project.attached_files) ? project.attached_files.length : 0,
-        // Preview image URL (if exists and not base64)
-        preview_image: previewImage,
-        // Indicate if we stripped base64 images
-        has_base64_images: hasBase64Images,
-      }
-    })
+    const ultraLight = projects.map(p => ({
+      id: p.id,
+      name: p.name || 'Unnamed',
+      description: (p.description || '').substring(0, 100), // Truncate description
+      department_id: p.department_id || '',
+      output_type: p.output_type || 'image',
+      image_model: p.image_model || 'flux-schnell',
+      created_at: p.created_at,
+      updated_at: p.updated_at,
+      reference_count: Array.isArray(p.reference_images) ? p.reference_images.length : 0,
+      attached_count: Array.isArray(p.attached_files) ? p.attached_files.length : 0,
+      has_base64: Array.isArray(p.reference_images) && p.reference_images.some(img => 
+        img.url && img.url.startsWith('data:image')
+      ),
+    }))
     
-    const responseSize = JSON.stringify(lightProjects).length
-    console.log(`📋 Returning ${lightProjects.length} lightweight projects (${(responseSize / 1024).toFixed(2)} KB)`)
+    const responseSize = JSON.stringify(ultraLight).length
+    console.log(`📋 Returning ${ultraLight.length} ultra-light projects (${(responseSize / 1024).toFixed(2)} KB)`)
     
-    return res.json({ projects: lightProjects })
+    // Add cache headers to prevent browser caching
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
+    res.setHeader('Pragma', 'no-cache')
+    res.setHeader('Expires', '0')
+    
+    return res.json({ projects: ultraLight })
   } catch (err) {
-    console.error('List projects error:', err.message)
+    console.error('❌ listProjects error:', err.message)
+    console.error('❌ Stack:', err.stack)
     return res.status(500).json({ error: err.message })
   }
 }
@@ -259,17 +243,25 @@ export async function listProjects(req, res) {
 // ============================================================
 export async function getProject(req, res) {
   try {
+    console.log('🔍 getProject called for:', req.params.id)
     const project = await getProjectById(req.params.id)
-    if (!project) return res.status(404).json({ error: 'Project not found' })
+    if (!project) {
+      console.log('⚠️ Project not found:', req.params.id)
+      return res.status(404).json({ error: 'Project not found' })
+    }
     
     const { role, department_id } = req.user
     if (role === 'dept_user' && project.department_id !== department_id) {
+      console.log('⚠️ Access denied for department user')
       return res.status(403).json({ error: 'Access denied' })
     }
     
+    const responseSize = JSON.stringify(project).length
+    console.log(`📋 Returning full project (${(responseSize / 1024).toFixed(2)} KB)`)
+    
     return res.json({ project })
   } catch (err) {
-    console.error('Get project error:', err.message)
+    console.error('❌ Get project error:', err.message)
     return res.status(500).json({ error: err.message })
   }
 }
