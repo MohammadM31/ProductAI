@@ -83,6 +83,10 @@ export const adminApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 120000,
     }).then(r => r.data),
+    uploadReferenceImage: (formData) =>
+      api.post('/api/reference-images/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }).then(r => r.data),
 }
 
 export default api

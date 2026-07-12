@@ -1,4 +1,4 @@
-// ProjectEditor.jsx - Complete file
+// ProjectEditor.jsx - Complete fixed file
 import React, { useState, useEffect } from 'react'
 import { X, Save, Trash2, Image, FileText, Upload, Plus, Eye, EyeOff } from 'lucide-react'
 import { adminApi } from '../../api/client'
@@ -114,7 +114,9 @@ export default function ProjectEditor({ project, departments, user, onSave, onDe
     }
   }
 
-  // Handle image upload
+  // ============================================================
+  // FIXED: Handle image upload - uploads file to server
+  // ============================================================
   const handleImageUpload = async (e) => {
     const file = e.target.files[0]
     if (!file) return
@@ -131,33 +133,37 @@ export default function ProjectEditor({ project, departments, user, onSave, onDe
     
     setUploading(true)
     try {
+      // Upload the file to the server
       const formData = new FormData()
       formData.append('image', file)
       
       const response = await adminApi.uploadReferenceImage(formData)
-        const newImage = {
-          id: `img-${Date.now()}-${Math.random()}`,
-          name: file.name,
-          url: response.url,
-          description: '',
-          style_analysis: '',
-        }
-        setForm(prev => ({
-          ...prev,
-          reference_images: [...prev.reference_images, newImage]
-        }))
-        toast.success('Image uploaded!')
+      
+      const newImage = {
+        id: `img-${Date.now()}-${Math.random()}`,
+        name: file.name,
+        url: response.url,  // ← Public URL from server
+        description: '',
+        style_analysis: '',
       }
-      reader.readAsDataURL(file)
+      setForm(prev => ({
+        ...prev,
+        reference_images: [...prev.reference_images, newImage]
+      }))
+      toast.success('Image uploaded!')
     } catch (err) {
       console.error('Upload error:', err)
-      toast.error('Failed to upload image')
+      toast.error(err.response?.data?.error || 'Failed to upload image')
     } finally {
       setUploading(false)
+      // Reset the file input
+      e.target.value = ''
     }
   }
 
-  // Handle file upload
+  // ============================================================
+  // Handle file upload (documents)
+  // ============================================================
   const handleFileUpload = async (e) => {
     const file = e.target.files[0]
     if (!file) return
@@ -185,6 +191,7 @@ export default function ProjectEditor({ project, departments, user, onSave, onDe
       toast.error('Failed to upload file')
     } finally {
       setFileUploading(false)
+      e.target.value = ''
     }
   }
 
