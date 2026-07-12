@@ -15,6 +15,7 @@ export default function AdminPanel() {
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(null)
   const [showEditor, setShowEditor] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   const [showDepartmentModal, setShowDepartmentModal] = useState(false)
   const [editingDepartment, setEditingDepartment] = useState(null)
@@ -33,7 +34,7 @@ export default function AdminPanel() {
   const [copiedItem, setCopiedItem] = useState(null)
   const [showDeptPassword, setShowDeptPassword] = useState({})
   const [zipUploading, setZipUploading] = useState(false)
-const [zipUploadResult, setZipUploadResult] = useState(null)
+  const [zipUploadResult, setZipUploadResult] = useState(null)
 
   const isAdmin = user?.role === 'admin'
 
@@ -63,7 +64,6 @@ const [zipUploadResult, setZipUploadResult] = useState(null)
     }
   }
 
-
   useEffect(() => {
     loadData()
   }, [])
@@ -71,12 +71,10 @@ const [zipUploadResult, setZipUploadResult] = useState(null)
   const loadData = async () => {
     setLoading(true)
     try {
-      // Always load projects (works for both admin and department users)
       const pData = await adminApi.listProjects()
       console.log('📋 Projects loaded:', pData.projects)
       setProjects(pData.projects || [])
       
-      // ONLY load departments if user is admin
       if (isAdmin) {
         try {
           const dData = await adminApi.listDepartments()
@@ -87,9 +85,7 @@ const [zipUploadResult, setZipUploadResult] = useState(null)
           setDepartments([])
         }
       } else {
-        // For department users, create a virtual department from their user info
         if (user?.department_id) {
-          // Try to find the department name from projects
           const deptProjects = (pData.projects || []).filter(p => p.department_id === user.department_id)
           const deptName = deptProjects.length > 0 
             ? deptProjects[0].department_name || 'My Department' 
@@ -186,7 +182,6 @@ const [zipUploadResult, setZipUploadResult] = useState(null)
         await adminApi.updateDepartment(editingDepartment.id, updateData)
         toast.success('Department updated!')
         
-        // Reload data
         await loadData()
         setDeptUsers(prev => {
           const newState = { ...prev }
@@ -208,8 +203,6 @@ const [zipUploadResult, setZipUploadResult] = useState(null)
         })
         
         toast.success(`Department "${result.department.name}" created!`)
-        
-        // Reload data
         await loadData()
       }
       
@@ -230,7 +223,6 @@ const [zipUploadResult, setZipUploadResult] = useState(null)
       await adminApi.deleteDepartment(dept.id)
       toast.success(`Department "${dept.name}" deleted`)
       
-      // Reload data
       await loadData()
       setDeptUsers(prev => {
         const newState = { ...prev }
@@ -262,15 +254,49 @@ const [zipUploadResult, setZipUploadResult] = useState(null)
     loadData()
   }
 
+  // ============================================================
+  // FIXED: Delete handler with proper state management
+  // ============================================================
   const handleDelete = async (id) => {
+    // Check if already deleting
+    if (isDeleting) return
+    
+    // Confirm with user
+    if (!confirm('Delete this project? This will permanently remove it and all associated outputs. This cannot be undone!')) {
+      return
+    }
+    
+    console.log('🗑️ Attempting to delete project:', id)
+    setIsDeleting(true)
+    
     try {
-      await adminApi.deleteProject(id)
-      setProjects(prev => prev.filter(p => p.id !== id))
+      // Call the API to delete
+      const response = await adminApi.deleteProject(id)
+      console.log('✅ Delete response:', response)
+      
+      // Update local state immediately
+      setProjects(prev => {
+        const updated = prev.filter(p => p.id !== id)
+        console.log('📋 Projects remaining:', updated.length)
+        return updated
+      })
+      
+      // Close the editor
       setShowEditor(false)
-      toast.success('Project deleted')
+      setEditing(null)
+      
+      toast.success('Project deleted successfully!')
     } catch (err) {
-      console.error('Delete project error:', err)
-      toast.error(err?.response?.data?.error || 'Failed to delete project')
+      console.error('❌ Delete error:', err)
+      console.error('❌ Error response:', err.response?.data)
+      
+      // Show error message
+      toast.error(err.response?.data?.error || 'Failed to delete project')
+      
+      // Reload to ensure UI matches server state
+      await loadData()
+    } finally {
+      setIsDeleting(false)
     }
   }
 
@@ -337,27 +363,27 @@ const [zipUploadResult, setZipUploadResult] = useState(null)
                 </button>
               </div>
 
-                    <div className="px-4 py-3 border-b border-stone-700 bg-stone-800/30">
-              <div className="flex items-center gap-2">
-                <label className="cursor-pointer flex items-center gap-1.5 text-xs bg-stone-700 hover:bg-stone-600 text-white font-medium px-3 py-1.5 rounded-lg transition-colors">
-                  <FileArchive size={12} />
-                  {zipUploading ? 'Uploading...' : 'Upload ZIP'}
-                  <input
-                    type="file"
-                    accept=".zip"
-                    onChange={handleZipUpload}
-                    disabled={zipUploading}
-                    className="hidden"
-                  />
-                </label>
-                {zipUploading && <Loader2 size={14} className="animate-spin text-amber-400" />}
-                {zipUploadResult && (
-                  <span className="text-xs text-emerald-400">
-                    ✓ {zipUploadResult.data.projects.length} projects parsed
-                  </span>
-                )}
+              <div className="px-4 py-3 border-b border-stone-700 bg-stone-800/30">
+                <div className="flex items-center gap-2">
+                  <label className="cursor-pointer flex items-center gap-1.5 text-xs bg-stone-700 hover:bg-stone-600 text-white font-medium px-3 py-1.5 rounded-lg transition-colors">
+                    <FileArchive size={12} />
+                    {zipUploading ? 'Uploading...' : 'Upload ZIP'}
+                    <input
+                      type="file"
+                      accept=".zip"
+                      onChange={handleZipUpload}
+                      disabled={zipUploading}
+                      className="hidden"
+                    />
+                  </label>
+                  {zipUploading && <Loader2 size={14} className="animate-spin text-amber-400" />}
+                  {zipUploadResult && (
+                    <span className="text-xs text-emerald-400">
+                      ✓ {zipUploadResult.data.projects.length} projects parsed
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
 
               {loading ? (
                 <div className="flex-1 flex items-center justify-center text-stone-500 text-sm">Loading…</div>
@@ -384,10 +410,7 @@ const [zipUploadResult, setZipUploadResult] = useState(null)
                             <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${
                               project.output_type === 'image' ? 'bg-amber-500/10' : 'bg-blue-500/10'
                             }`}>
-                              {project.output_type === 'image'
-                                ? <Image size={13} className="text-amber-400" />
-                                : <Image size={13} className="text-amber-400" />
-                              }
+                              <Image size={13} className="text-amber-400" />
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm text-stone-200 truncate">{project.name}</p>
