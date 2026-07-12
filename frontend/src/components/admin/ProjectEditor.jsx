@@ -1,11 +1,10 @@
-// ProjectEditor.jsx - Add department dropdown
-
+// ProjectEditor.jsx - Complete file
 import React, { useState, useEffect } from 'react'
-import { X, Save, Trash2, Image, FileText, Upload, Plus, X as RemoveIcon } from 'lucide-react'
+import { X, Save, Trash2, Image, FileText, Upload, Plus, Eye, EyeOff } from 'lucide-react'
 import { adminApi } from '../../api/client'
 import toast from 'react-hot-toast'
 
-export default function ProjectEditor({ project, departments, onSave, onDelete, onClose }) {
+export default function ProjectEditor({ project, departments, user, onSave, onDelete, onClose }) {
   const [form, setForm] = useState({
     name: '',
     description: '',
@@ -22,6 +21,9 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [fileUploading, setFileUploading] = useState(false)
+
+  const isAdmin = user?.role === 'admin'
+  const isDeptUser = user?.role === 'dept_user'
 
   // Available image models
   const imageModels = [
@@ -48,8 +50,14 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
         reference_images: project.reference_images || [],
         attached_files: project.attached_files || [],
       })
+    } else if (isDeptUser && user?.department_id) {
+      // For department users creating a new project, auto-set their department
+      setForm(prev => ({
+        ...prev,
+        department_id: user.department_id
+      }))
     }
-  }, [project])
+  }, [project, isDeptUser, user])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -60,7 +68,14 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
       return
     }
     
-    if (!form.department_id) {
+    // For department users, ensure they have a department
+    if (isDeptUser && !user?.department_id) {
+      toast.error('You are not assigned to a department')
+      return
+    }
+    
+    // For admin, require department selection
+    if (isAdmin && !form.department_id) {
       toast.error('Please select a department')
       return
     }
@@ -69,6 +84,8 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
     try {
       const data = {
         ...form,
+        // For department users, force their department ID
+        department_id: isDeptUser ? user.department_id : form.department_id,
         reference_images: form.reference_images.map(img => ({
           ...img,
           id: img.id || `img-${Date.now()}-${Math.random()}`
@@ -195,6 +212,11 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
             </h2>
             <p className="text-sm text-stone-400">
               {project?.id ? 'Update project settings and guidelines' : 'Create a new project for content generation'}
+              {isDeptUser && (
+                <span className="block text-xs text-amber-400 mt-1">
+                  Projects will be created in your department: {user?.department_name || 'Your Department'}
+                </span>
+              )}
             </p>
           </div>
           <button
@@ -206,7 +228,7 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Project Name */}
+          {/* Project Details */}
           <div className="bg-stone-800/50 border border-stone-700 rounded-xl p-6">
             <h3 className="text-sm font-medium text-white mb-4">Project Details</h3>
             
@@ -225,30 +247,49 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
                 />
               </div>
 
-              {/* DEPARTMENT DROPDOWN - ADD THIS */}
-              <div>
-                <label className="block text-xs font-medium text-stone-400 mb-1.5">
-                  Department <span className="text-rose-400">*</span>
-                </label>
-                <select
-                  value={form.department_id}
-                  onChange={(e) => setForm({ ...form, department_id: e.target.value })}
-                  className="w-full bg-stone-900 border border-stone-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500/50 transition-colors"
-                  required
-                >
-                  <option value="">Select a department...</option>
-                  {departments.map(dept => (
-                    <option key={dept.id} value={dept.id}>
-                      {dept.name}
-                    </option>
-                  ))}
-                </select>
-                {departments.length === 0 && (
-                  <p className="text-xs text-amber-400 mt-1">
-                    ⚠️ No departments available. Create one first in the Departments tab.
+              {/* DEPARTMENT DROPDOWN - SHOW ONLY FOR ADMIN */}
+              {isAdmin ? (
+                <div>
+                  <label className="block text-xs font-medium text-stone-400 mb-1.5">
+                    Department <span className="text-rose-400">*</span>
+                  </label>
+                  <select
+                    value={form.department_id}
+                    onChange={(e) => setForm({ ...form, department_id: e.target.value })}
+                    className="w-full bg-stone-900 border border-stone-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500/50 transition-colors"
+                    required
+                  >
+                    <option value="">Select a department...</option>
+                    {departments.map(dept => (
+                      <option key={dept.id} value={dept.id}>
+                        {dept.name}
+                      </option>
+                    ))}
+                  </select>
+                  {departments.length === 0 && (
+                    <p className="text-xs text-amber-400 mt-1">
+                      ⚠️ No departments available. Create one first in the Departments tab.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                /* For department users - show department info but disabled */
+                <div>
+                  <label className="block text-xs font-medium text-stone-400 mb-1.5">
+                    Department
+                  </label>
+                  <div className="w-full bg-stone-900 border border-stone-700 rounded-lg px-4 py-2.5 text-sm text-stone-400">
+                    {user?.department_name || user?.department_id || 'Your Department'}
+                    <input
+                      type="hidden"
+                      value={form.department_id || user?.department_id || ''}
+                    />
+                  </div>
+                  <p className="text-xs text-stone-500 mt-1">
+                    Projects are automatically assigned to your department
                   </p>
-                )}
-              </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-medium text-stone-400 mb-1.5">
@@ -398,7 +439,7 @@ export default function ProjectEditor({ project, departments, onSave, onDelete, 
                 placeholder="Describe the style, composition, colors from the reference images..."
               />
               <p className="text-xs text-stone-500 mt-1">
-                Example: Images should follow the brand guidelines...
+                Example: Images should follow the brand guidelines with warm lighting...
               </p>
             </div>
           </div>

@@ -434,6 +434,7 @@ const [zipUploadResult, setZipUploadResult] = useState(null)
                 <ProjectEditor
                   project={editing}
                   departments={departments}
+                  user={user}
                   onSave={handleSave}
                   onDelete={handleDelete}
                   onClose={() => setShowEditor(false)}
