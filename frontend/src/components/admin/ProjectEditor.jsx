@@ -131,13 +131,14 @@ export default function ProjectEditor({ project, departments, user, onSave, onDe
     
     setUploading(true)
     try {
-      const reader = new FileReader()
-      reader.onload = (event) => {
-        const base64 = event.target.result
+      const formData = new FormData()
+      formData.append('image', file)
+      
+      const response = await adminApi.uploadReferenceImage(formData)
         const newImage = {
           id: `img-${Date.now()}-${Math.random()}`,
           name: file.name,
-          url: base64,
+          url: response.url,
           description: '',
           style_analysis: '',
         }
