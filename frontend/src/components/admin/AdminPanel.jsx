@@ -143,6 +143,25 @@ const [zipUploadResult, setZipUploadResult] = useState(null)
     }
   }
 
+  // Add this component or button in your admin panel
+const fixMenuItemProject = async () => {
+  try {
+    const result = await adminApi.fixProjectType('proj-menu-items-001', 'image')
+    toast.success('✅ Menu item project fixed! Now generating images.')
+    loadData() // Reload to see the change
+  } catch (err) {
+    toast.error('Failed to fix project: ' + err.message)
+  }
+}
+
+// Add this button somewhere in your UI
+<button
+  onClick={fixMenuItemProject}
+  className="bg-emerald-500 hover:bg-emerald-400 text-white px-3 py-1.5 rounded-lg text-xs"
+>
+  🔧 Fix Menu Item (Set to Image)
+</button>
+
   const copyToClipboard = (text, type) => {
     navigator.clipboard.writeText(text)
     setCopiedItem(type)
