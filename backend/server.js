@@ -18,6 +18,12 @@ const __dirname = path.dirname(__filename)
 
 const app = express()
 
+// Render (and most PaaS hosts) terminate TLS at a proxy and forward plain
+// HTTP internally. Without this, req.protocol always reports "http" even
+// on a live https:// deployment, which breaks any URL we build from it
+// (e.g. the reference-image upload endpoint).
+app.set('trust proxy', 1)
+
 // ============================================================
 // ✅ COMPLETE CORS FIX - Allow ALL origins for testing
 // ============================================================

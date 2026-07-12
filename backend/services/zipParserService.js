@@ -9,6 +9,22 @@ import { fileURLToPath } from 'url'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
+function getPublicBaseUrl() {
+  const base = process.env.PUBLIC_BASE_URL
+  if (!base) {
+    if (config.nodeEnv === 'production') {
+      console.error(
+        '❌ PUBLIC_BASE_URL is not set! Reference images imported right now will be saved ' +
+        'with an unreachable "http://localhost:5000" URL, and Replicate will NOT be able to ' +
+        'fetch them for generation. Set PUBLIC_BASE_URL to your deployed backend URL ' +
+        '(e.g. https://your-app.onrender.com) in your environment variables.'
+      )
+    }
+    return 'http://localhost:5000'
+  }
+  return base.replace(/\/$/, '')
+}
+
 export async function parseGuidelinesZip(zipBuffer) {
   const zip = new AdmZip(zipBuffer)
   const entries = zip.getEntries()
@@ -71,7 +87,7 @@ async function processImageToFile(entry, categoryName) {
     const filepath = path.join(uploadDir, filename)
     fs.writeFileSync(filepath, data)
     
-    const publicUrl = `${process.env.PUBLIC_BASE_URL || 'http://localhost:5000'}/uploads/reference_images/${filename}`
+    const publicUrl = `${getPublicBaseUrl()}/uploads/reference_images/${filename}`
     
     return {
       id: uuidv4(),

@@ -43,3 +43,7 @@ services:
         value: dall-e-2
       - key: REPLICATE_IMAGE_MODEL
         value: flux-schnell
+      - key: PUBLIC_BASE_URL
+        sync: false # ⚠️ MUST be set to your live backend URL, e.g. https://productai.onrender.com
+                    # Without this, reference images get saved with an unreachable
+                    # http://localhost:5000 URL and Replicate can't fetch them.

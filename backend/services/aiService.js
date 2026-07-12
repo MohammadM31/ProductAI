@@ -318,7 +318,14 @@ async function convertBase64ToPublicUrl(base64Data, filename = null) {
     const filepath = path.join(uploadDir, name)
     fs.writeFileSync(filepath, buffer)
     
-    const publicUrl = `${process.env.PUBLIC_BASE_URL || 'http://localhost:5000'}/uploads/reference_images/${name}`
+    const base = process.env.PUBLIC_BASE_URL
+    if (!base && config.nodeEnv === 'production') {
+      console.error(
+        '❌ PUBLIC_BASE_URL is not set! This reference image will be saved with an ' +
+        'unreachable "http://localhost:5000" URL, and Replicate will NOT be able to fetch it.'
+      )
+    }
+    const publicUrl = `${(base || 'http://localhost:5000').replace(/\/$/, '')}/uploads/reference_images/${name}`
     return publicUrl
   } catch (err) {
     console.error('❌ Failed to convert base64 image:', err.message)
