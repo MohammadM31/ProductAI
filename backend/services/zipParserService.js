@@ -1,3 +1,4 @@
+// backend/services/zipParserService.js
 import AdmZip from 'adm-zip'
 import { config } from '../config/index.js'
 import { v4 as uuidv4 } from 'uuid'
@@ -89,7 +90,8 @@ async function processImageToFile(entry, categoryName) {
 async function extractAndProcessFiles(tree, entries) {
   const result = { projects: [] }
   
-  function traverse(node, path = []) {
+  // FIX: Add 'async' here
+  async function traverse(node, path = []) {
     if (node.files && node.files.length > 0 && Object.keys(node.children).length === 0) {
       const categoryName = path[path.length - 1] || 'Uncategorized'
       const requestType = path[path.length - 2] || 'General'
@@ -152,11 +154,11 @@ async function extractAndProcessFiles(tree, entries) {
     }
     
     for (const [name, child] of Object.entries(node.children || {})) {
-      traverse(child, [...path, name])
+      await traverse(child, [...path, name])  // Add 'await' here
     }
   }
   
-  traverse(tree)
+  await traverse(tree)  // Add 'await' here
   
   return result
 }
