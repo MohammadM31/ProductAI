@@ -7,6 +7,7 @@ import {
   searchDocuments,
 } from './databaseService.js'
 import { config } from '../config/index.js'
+import { cache } from './cacheService.js'
 
 export async function getAllProjects() {
   return searchDocuments(config.indices.projects, {
@@ -30,7 +31,7 @@ export async function createProject(data, createdBy) {
   const id = uuidv4()
   const now = new Date().toISOString()
   
-  // Ensure arrays are properly initialized - FIXED
+  // Ensure arrays are properly initialized
   const project = {
     id,
     name: data.name || '',
@@ -49,13 +50,18 @@ export async function createProject(data, createdBy) {
   }
   
   await indexDocument(config.indices.projects, id, project)
+  
+  // Clear cache so new project is picked up
+  cache.clearProjects()
+  console.log(`✅ Created project: "${project.name}"`)
+  
   return project
 }
 
 export async function updateProject(id, data) {
   const now = new Date().toISOString()
   
-  // Ensure arrays are properly initialized - FIXED
+  // Ensure arrays are properly initialized
   const updateData = {
     name: data.name,
     description: data.description,
@@ -78,11 +84,26 @@ export async function updateProject(id, data) {
   })
   
   await updateDocument(config.indices.projects, id, updateData)
+  
+  // Clear cache so updated project is picked up
+  cache.clearProjects()
+  console.log(`✅ Updated project: ${id}`)
+  
   return getProjectById(id)
 }
 
 export async function deleteProject(id) {
-  return deleteDocument(config.indices.projects, id)
+  // Get project name for logging
+  const project = await getProjectById(id)
+  const name = project?.name || id
+  
+  await deleteDocument(config.indices.projects, id)
+  
+  // Clear cache so deleted project is removed
+  cache.clearProjects()
+  console.log(`🗑️ Deleted project: "${name}"`)
+  
+  return { success: true, id, name }
 }
 
 export async function getAllDepartments() {
@@ -96,6 +117,11 @@ export async function createDepartment(data) {
   const id = uuidv4()
   const dept = { id, ...data, created_at: new Date().toISOString() }
   await indexDocument(config.indices.departments, id, dept)
+  
+  // Clear departments cache
+  cache.clearDepartments()
+  console.log(`✅ Created department: "${dept.name}"`)
+  
   return dept
 }
 
@@ -115,9 +141,24 @@ export async function updateDepartment(id, data) {
   })
   
   await updateDocument(config.indices.departments, id, updateData)
+  
+  // Clear departments cache
+  cache.clearDepartments()
+  console.log(`✅ Updated department: ${id}`)
+  
   return getDocument(config.indices.departments, id)
 }
 
 export async function deleteDepartment(id) {
-  return deleteDocument(config.indices.departments, id)
+  // Get department name for logging
+  const dept = await getDocument(config.indices.departments, id)
+  const name = dept?.name || id
+  
+  await deleteDocument(config.indices.departments, id)
+  
+  // Clear departments cache
+  cache.clearDepartments()
+  console.log(`🗑️ Deleted department: "${name}"`)
+  
+  return { success: true, id, name }
 }

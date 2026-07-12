@@ -262,37 +262,17 @@ const [zipUploadResult, setZipUploadResult] = useState(null)
     loadData()
   }
 
-  // In AdminPanel.jsx - Replace handleDelete with this
-const handleDelete = async (id) => {
-  // Confirm deletion
-  if (!confirm('Delete this project? This cannot be undone.')) {
-    return
+  const handleDelete = async (id) => {
+    try {
+      await adminApi.deleteProject(id)
+      setProjects(prev => prev.filter(p => p.id !== id))
+      setShowEditor(false)
+      toast.success('Project deleted')
+    } catch (err) {
+      console.error('Delete project error:', err)
+      toast.error(err?.response?.data?.error || 'Failed to delete project')
+    }
   }
-  
-  console.log('🗑️ Deleting project:', id)
-  setLoading(true)
-  
-  try {
-    // Call the API to delete
-    await adminApi.deleteProject(id)
-    console.log('✅ Project deleted from server')
-    
-    // Remove from local state
-    setProjects(prev => prev.filter(p => p.id !== id))
-    setShowEditor(false)
-    setEditing(null)
-    
-    toast.success('Project deleted successfully!')
-  } catch (err) {
-    console.error('❌ Delete error:', err)
-    toast.error(err.response?.data?.error || 'Failed to delete project')
-    
-    // Reload to restore correct state
-    await loadData()
-  } finally {
-    setLoading(false)
-  }
-}
 
   // Group projects by department
   const grouped = departments.map(dept => ({

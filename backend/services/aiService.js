@@ -4,6 +4,7 @@ import { searchDocuments, indexDocument, getDocument } from './databaseService.j
 import { v4 as uuidv4 } from 'uuid'
 import { generateImageWithReplicate, generateImageWithFallback } from './replicateService.js'
 import { buildLayeredPsd } from './psdService.js'
+import { cache } from './cacheService.js'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -24,166 +25,38 @@ function getDeepSeek() {
 }
 
 // ============================================================
-// AI-Powered Project Mapping with Department Awareness
+// FAST MAPPING - Keyword-based matching (always runs first)
 // ============================================================
-export async function mapRequestToProject(requestText) {
-  const projects = await searchDocuments(config.indices.projects, {
-    query: { match_all: {} },
-    size: 50,
-  })
-
-  if (projects.length === 0) return null
-
-  if (projects.length === 1) {
-    console.log(`✅ Only one project exists: "${projects[0].name}"`)
-    return projects[0]
-  }
-
-  try {
-    const departments = await searchDocuments(config.indices.departments, {
-      query: { match_all: {} },
-      size: 50,
-    })
-    const deptMap = {}
-    departments.forEach(d => { deptMap[d.id] = d.name })
-
-    const projectList = projects.map(p => {
-      const deptName = deptMap[p.department_id] || 'Unassigned'
-      let info = `PROJECT ID: ${p.id}\n`
-      info += `Name: ${p.name}\n`
-      info += `Department: ${deptName}\n`
-      info += `Description: ${p.description || 'No description'}\n`
-      info += `Output Type: ${p.output_type || 'image'}\n`
-      
-      if (p.reference_criteria) {
-        info += `Style Guide: ${p.reference_criteria.substring(0, 200)}...\n`
-      }
-      
-      if (p.system_prompt) {
-        const promptSummary = p.system_prompt.substring(0, 150)
-        info += `Guidelines: ${promptSummary}...\n`
-      }
-      
-      return info
-    }).join('\n---\n')
-
-    const systemPrompt = `You are an intelligent project routing system. Your task is to analyze user requests and match them to the most appropriate project.
-
-CRITICAL RULES:
-1. Understand the user's INTENT and what they want to CREATE
-2. Consider the project's PURPOSE, not just keywords
-3. Pay attention to the DEPARTMENT context
-4. If multiple projects could work, pick the BEST fit based on INTENT
-5. Reply with ONLY the project ID - nothing else, no explanation
-
-AVAILABLE PROJECTS:
-${projectList}
-
-USER REQUEST: "${requestText}"
-
-Analyze what the user wants to create and which project best matches their intent. Reply with ONLY the project ID.`
-
-    const deepseek = getDeepSeek()
-    let resp
-    
-    try {
-      resp = await deepseek.chat.completions.create({
-        model: config.deepseek.model || 'deepseek-chat',
-        max_tokens: 50,
-        temperature: 0.1,
-        messages: [
-          {
-            role: 'system',
-            content: systemPrompt,
-          },
-          {
-            role: 'user',
-            content: `Project ID:`
-          },
-        ],
-      })
-    } catch (apiError) {
-      console.error('❌ DeepSeek API error:', apiError.message)
-      if (apiError.status === 402) {
-        console.log('⚠️ DeepSeek API requires payment. Using fallback matching.')
-      }
-      const fallbackMatch = await fallbackProjectMatch(requestText, projects, deptMap)
-      if (fallbackMatch) return fallbackMatch
-      return projects[0]
-    }
-
-    const projectId = resp.choices[0].message.content.trim()
-    console.log(`🤖 AI suggested project ID: "${projectId}"`)
-    
-    const matchedProject = projects.find(p => p.id === projectId)
-    
-    if (matchedProject) {
-      const deptName = deptMap[matchedProject.department_id] || 'Unknown Department'
-      console.log(`✅ AI matched to: "${matchedProject.name}" (${deptName})`)
-      return matchedProject
-    }
-
-    console.log(`⚠️ AI returned invalid ID, using fallback`)
-    const fallbackMatch = await fallbackProjectMatch(requestText, projects, deptMap)
-    if (fallbackMatch) return fallbackMatch
-    
-    return projects[0]
-
-  } catch (err) {
-    console.error('❌ AI mapping failed:', err.message)
-    
-    console.log('🔄 Falling back to intelligent matching...')
-    const departments = await searchDocuments(config.indices.departments, {
-      query: { match_all: {} },
-      size: 50,
-    })
-    const deptMap = {}
-    departments.forEach(d => { deptMap[d.id] = d.name })
-    
-    const fallbackMatch = await fallbackProjectMatch(requestText, projects, deptMap)
-    if (fallbackMatch) return fallbackMatch
-    
-    console.log(`⚠️ No match found, using default: "${projects[0].name}"`)
-    return projects[0]
-  }
-}
-
-// ============================================================
-// Intelligent Fallback Matching
-// ============================================================
-async function fallbackProjectMatch(requestText, projects, deptMap) {
-  const lowerRequest = requestText.toLowerCase()
+export async function fastMapRequest(requestText) {
+  console.log('⚡ Using fast mapping for:', requestText.substring(0, 50) + '...')
   
+  const projects = await cache.getProjects()
+  if (projects.length === 0) return null
+  if (projects.length === 1) return projects[0]
+  
+  const lowerRequest = requestText.toLowerCase()
+  const words = lowerRequest.split(/\s+/).filter(w => w.length > 3)
+  
+  // Score each project based on keyword matches
   const scored = projects.map(project => {
     let score = 0
     const keywords = (project.trigger_keywords || '').toLowerCase().split(/\s+/)
-    const description = (project.description || '').toLowerCase()
     const name = (project.name || '').toLowerCase()
+    const description = (project.description || '').toLowerCase()
     const criteria = (project.reference_criteria || '').toLowerCase()
     
-    for (const kw of keywords) {
-      if (kw.length > 2 && lowerRequest.includes(kw)) {
+    // Check each word against project keywords
+    for (const word of words) {
+      if (keywords.some(kw => kw.includes(word) || word.includes(kw))) {
         score += 3
       }
-    }
-    
-    const descWords = description.split(/\s+/)
-    for (const word of descWords) {
-      if (word.length > 3 && lowerRequest.includes(word)) {
+      if (name.includes(word)) {
         score += 2
       }
-    }
-    
-    const nameWords = name.split(/\s+/)
-    for (const word of nameWords) {
-      if (word.length > 3 && lowerRequest.includes(word)) {
-        score += 2
+      if (description.includes(word)) {
+        score += 1
       }
-    }
-    
-    const criteriaWords = criteria.split(/\s+/)
-    for (const word of criteriaWords) {
-      if (word.length > 4 && lowerRequest.includes(word)) {
+      if (criteria.includes(word)) {
         score += 1
       }
     }
@@ -194,13 +67,166 @@ async function fallbackProjectMatch(requestText, projects, deptMap) {
   scored.sort((a, b) => b.score - a.score)
   const best = scored[0]
   
-  if (best.score >= 3) {
-    const deptName = deptMap[best.project.department_id] || 'Unknown'
-    console.log(`✅ Fallback matched "${best.project.name}" (${deptName}) with score ${best.score}`)
+  if (best.score >= 2) {
+    const deptName = await getDepartmentName(best.project.department_id)
+    console.log(`✅ Fast match found: "${best.project.name}" (${deptName}) score: ${best.score}`)
     return best.project
   }
   
+  console.log('⚠️ No fast match found (score too low)')
   return null
+}
+
+// ============================================================
+// AI MAPPING - DeepSeek-based matching (fallback)
+// ============================================================
+async function aiMapRequest(requestText) {
+  console.log('🧠 Using AI for project mapping...')
+  
+  const projects = await cache.getProjects()
+  if (projects.length === 0) return null
+  if (projects.length === 1) return projects[0]
+  
+  const departments = await cache.getDepartments()
+  const deptMap = {}
+  departments.forEach(d => { deptMap[d.id] = d.name })
+  
+  // Build project list for AI
+  const projectList = projects.map(p => {
+    const deptName = deptMap[p.department_id] || 'Unassigned'
+    return `ID: ${p.id}\nName: ${p.name}\nDepartment: ${deptName}\nDescription: ${p.description || 'No description'}\nKeywords: ${p.trigger_keywords || ''}\n---`
+  }).join('\n')
+  
+  const systemPrompt = `You are a project router. Analyze the user request and pick the best matching project.
+
+AVAILABLE PROJECTS:
+${projectList}
+
+USER REQUEST: "${requestText}"
+
+Reply with ONLY the project ID. No explanation.`
+
+  const deepseek = getDeepSeek()
+  const resp = await deepseek.chat.completions.create({
+    model: config.deepseek.model || 'deepseek-chat',
+    max_tokens: 20,
+    temperature: 0.1,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: 'Project ID:' }
+    ],
+  })
+  
+  const projectId = resp.choices[0].message.content.trim()
+  const matchedProject = projects.find(p => p.id === projectId)
+  
+  if (matchedProject) {
+    const deptName = deptMap[matchedProject.department_id] || 'Unknown'
+    console.log(`✅ AI matched: "${matchedProject.name}" (${deptName})`)
+    return matchedProject
+  }
+  
+  // Fallback to first project
+  console.log('⚠️ AI returned invalid ID, using first project')
+  return projects[0]
+}
+
+// ============================================================
+// MAIN MAPPING FUNCTION - Fast + AI with timeout
+// ============================================================
+export async function mapRequestToProject(requestText, timeout = 3000) {
+  console.log('🤖 Mapping request:', requestText.substring(0, 50) + '...')
+  
+  // Step 1: Try fast keyword matching first (always)
+  const fastMatch = await fastMapRequest(requestText)
+  if (fastMatch) {
+    const deptName = await getDepartmentName(fastMatch.department_id)
+    console.log(`✅ Fast mapping returned: "${fastMatch.name}" (${deptName})`)
+    return fastMatch
+  }
+  
+  // Step 2: If fast match didn't work, try AI with timeout
+  try {
+    console.log('⏳ Fast match not found, trying AI mapping with timeout...')
+    
+    const result = await Promise.race([
+      aiMapRequest(requestText),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('AI mapping timeout')), timeout)
+      )
+    ])
+    
+    return result
+  } catch (err) {
+    console.warn('⚠️ AI mapping timed out or failed, using fallback:', err.message)
+    // Fallback to fast match again (will return best available)
+    const fallback = await fastMapRequest(requestText)
+    if (fallback) return fallback
+    
+    // Ultimate fallback: return first project
+    const projects = await cache.getProjects()
+    if (projects.length > 0) {
+      console.log(`📋 Ultimate fallback: using "${projects[0].name}"`)
+      return projects[0]
+    }
+    
+    return null
+  }
+}
+
+// ============================================================
+// Helper: Get Department Name
+// ============================================================
+async function getDepartmentName(departmentId) {
+  if (!departmentId) return 'Unassigned'
+  try {
+    const departments = await cache.getDepartments()
+    const found = departments.find(d => d.id === departmentId)
+    return found ? found.name : 'Unknown'
+  } catch {
+    return 'Unknown'
+  }
+}
+
+// ============================================================
+// QUICK MAPPING FOR FALLBACK (original)
+// ============================================================
+export async function quickMapRequest(requestText) {
+  const projects = await cache.getProjects()
+  
+  if (projects.length === 0) return null
+  if (projects.length === 1) return projects[0]
+  
+  const lowerRequest = requestText.toLowerCase()
+  
+  const scored = projects.map(project => {
+    let score = 0
+    const keywords = (project.trigger_keywords || '').toLowerCase().split(/\s+/)
+    const name = (project.name || '').toLowerCase()
+    
+    for (const kw of keywords) {
+      if (kw.length > 2 && lowerRequest.includes(kw)) {
+        score += 3
+      }
+    }
+    
+    const nameWords = name.split(/\s+/)
+    for (const word of nameWords) {
+      if (word.length > 3 && lowerRequest.includes(word)) {
+        score += 2
+      }
+    }
+    
+    return { project, score }
+  })
+  
+  scored.sort((a, b) => b.score - a.score)
+  
+  if (scored[0].score >= 2) {
+    return scored[0].project
+  }
+  
+  return projects[0]
 }
 
 // ============================================================
@@ -746,48 +772,4 @@ export async function getOutputsByProject(projectId) {
     sort: [{ created_at: { order: 'desc' } }],
     size: 100,
   })
-}
-
-// ============================================================
-// Quick mapping for fallback
-// ============================================================
-export async function quickMapRequest(requestText) {
-  const projects = await searchDocuments(config.indices.projects, {
-    query: { match_all: {} },
-    size: 50,
-  })
-  
-  if (projects.length === 0) return null
-  if (projects.length === 1) return projects[0]
-  
-  const lowerRequest = requestText.toLowerCase()
-  
-  const scored = projects.map(project => {
-    let score = 0
-    const keywords = (project.trigger_keywords || '').toLowerCase().split(/\s+/)
-    const name = (project.name || '').toLowerCase()
-    
-    for (const kw of keywords) {
-      if (kw.length > 2 && lowerRequest.includes(kw)) {
-        score += 3
-      }
-    }
-    
-    const nameWords = name.split(/\s+/)
-    for (const word of nameWords) {
-      if (word.length > 3 && lowerRequest.includes(word)) {
-        score += 2
-      }
-    }
-    
-    return { project, score }
-  })
-  
-  scored.sort((a, b) => b.score - a.score)
-  
-  if (scored[0].score >= 2) {
-    return scored[0].project
-  }
-  
-  return projects[0]
 }
