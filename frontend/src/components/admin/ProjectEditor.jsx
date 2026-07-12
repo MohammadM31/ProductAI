@@ -27,12 +27,14 @@ export default function ProjectEditor({ project, departments, user, onSave, onDe
 
   // Available image models
   const imageModels = [
-    { value: 'flux-schnell', label: 'FLUX Schnell (Fast, $0.003/image)' },
-    { value: 'flux-dev', label: 'FLUX Dev (Good quality, $0.015/image)' },
-    { value: 'flux-1.1-pro', label: 'FLUX-1.1-Pro (Best quality, $0.04/image)' },
-    { value: 'sdxl', label: 'SDXL (Stable Diffusion, $0.003/image)' },
-    { value: 'recraft-v4', label: 'Recraft V4 (Design-first, $0.04/image)' },
-    { value: 'recraft-v4-svg', label: 'Recraft V4 SVG (Vector output, $0.04/image)' },
+    { value: 'flux-schnell', label: 'FLUX Schnell (Fast, $0.003/image) — no reference image support' },
+    { value: 'flux-1.1-pro', label: 'FLUX-1.1-Pro (Best quality, $0.04/image) — no reference image support' },
+    { value: 'flux-dev', label: 'FLUX Dev (Good quality, $0.015/image) — honors reference image' },
+    { value: 'sdxl', label: 'SDXL (Stable Diffusion, $0.003/image) — honors reference image' },
+    { value: 'flux-kontext-pro', label: 'FLUX Kontext Pro (Best for product refs, $0.04/image) — honors reference image' },
+    { value: 'flux-kontext-max', label: 'FLUX Kontext Max (Premium, $0.08/image) — honors reference image' },
+    { value: 'recraft-v4', label: 'Recraft V4 (Design-first, $0.04/image) — no reference image support' },
+    { value: 'recraft-v4-svg', label: 'Recraft V4 SVG (Vector output, $0.04/image) — no reference image support' },
   ]
 
   // Load project data if editing
@@ -341,6 +343,11 @@ export default function ProjectEditor({ project, departments, user, onSave, onDe
           {/* Reference Images */}
           <div className="bg-stone-800/50 border border-stone-700 rounded-xl p-6">
             <h3 className="text-sm font-medium text-white mb-4">Reference Images</h3>
+            <p className="text-xs text-stone-500 mb-3">
+              If this project has reference images, generation automatically uses a model that
+              actually locks onto them (FLUX Kontext Pro), even if "{form.image_model}" is selected
+              above for text-only requests.
+            </p>
             <div>
               <label className="block text-xs font-medium text-stone-400 mb-1.5">
                 Upload Reference Image

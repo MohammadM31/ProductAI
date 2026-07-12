@@ -122,30 +122,53 @@ const MODEL_CONFIGS = {
     },
     outputExtension: 'svg',
   },
+  'flux-kontext-pro': {
+    version: 'black-forest-labs/flux-kontext-pro',
+    input: {
+      prompt: '',
+      aspect_ratio: 'match_input_image',
+      output_format: 'png',
+    },
+    supportsReference: true,
+  },
+  'flux-kontext-max': {
+    version: 'black-forest-labs/flux-kontext-max',
+    input: {
+      prompt: '',
+      aspect_ratio: 'match_input_image',
+      output_format: 'png',
+    },
+    supportsReference: true,
+  },
 }
+
+// Models that genuinely accept a reference/input image on Replicate.
+// flux-schnell and flux-1.1-pro are TEXT-TO-IMAGE ONLY — they have no
+// image parameter, so passing a reference URL to them is silently ignored.
+const REFERENCE_CAPABLE_MODELS = new Set([
+  'flux-dev',
+  'sdxl',
+  'flux-kontext-pro',
+  'flux-kontext-max',
+])
 
 // ============================================================
 // Main generation function with image-to-image support
 // ============================================================
 export async function generateImageWithReplicate(prompt, modelName = 'flux-schnell', referenceImage = null) {
   const replicate = getReplicate()
-  
-  const configModel = MODEL_CONFIGS[modelName] || MODEL_CONFIGS['flux-schnell']
-  
-  const input = { ...configModel.input }
-  input.prompt = prompt
-  
+
   const isModification = prompt.includes('instead of') || 
                          prompt.includes('change') || 
                          prompt.includes('remove') ||
                          prompt.includes('without')
-  
+
   let useReference = false
-  
+
   if (referenceImage) {
     console.log('🖼️ Reference image provided')
     console.log(`   URL: ${referenceImage.substring(0, 100)}...`)
-    
+
     // Validate that the reference image is a valid HTTP URL
     if (referenceImage.startsWith('http://') || referenceImage.startsWith('https://')) {
       useReference = true
@@ -158,33 +181,46 @@ export async function generateImageWithReplicate(prompt, modelName = 'flux-schne
       console.log('   Continuing with prompt-only generation...')
     }
   }
-  
-  if (useReference) {
-    if (modelName.startsWith('flux')) {
-      input.image = referenceImage
-      if (isModification) {
-        input.prompt_strength = 0.4
-        console.log('   Modification mode: prompt_strength 0.4')
-      } else {
-        input.prompt_strength = 0.15
-        console.log('   Replication mode: prompt_strength 0.15')
-      }
-      input.guidance_scale = 3.5
-    }
-    
-    if (modelName === 'sdxl') {
-      input.image = referenceImage
-      input.denoising_strength = isModification ? 0.5 : 0.3
-    }
 
-    if (modelName.startsWith('recraft')) {
-      console.warn('⚠️ Recraft models don\'t support direct img2img reference locking yet.')
+  // IMPORTANT: not every model actually supports a reference image.
+  // flux-schnell and flux-1.1-pro are text-to-image only on Replicate —
+  // passing an "image" input to them does nothing. If the project's chosen
+  // model can't use a reference, transparently switch to one that can so
+  // the reference image is never silently dropped.
+  let effectiveModelName = modelName
+  if (useReference && !REFERENCE_CAPABLE_MODELS.has(modelName)) {
+    effectiveModelName = 'flux-kontext-pro'
+    console.warn(
+      `⚠️ Model "${modelName}" does not support reference images on Replicate. ` +
+      `Auto-switching to "flux-kontext-pro" for this request so the reference image is honored.`
+    )
+  }
+
+  const configModel = MODEL_CONFIGS[effectiveModelName] || MODEL_CONFIGS['flux-schnell']
+  const input = { ...configModel.input }
+  input.prompt = prompt
+
+  if (useReference) {
+    if (effectiveModelName === 'flux-kontext-pro' || effectiveModelName === 'flux-kontext-max') {
+      // Kontext models take the reference as `input_image` and edit it
+      // directly based on the prompt instructions — this is the model
+      // family built for "keep the product, change the context" edits.
+      input.input_image = referenceImage
+    } else if (effectiveModelName === 'flux-dev') {
+      input.image = referenceImage
+      input.prompt_strength = isModification ? 0.4 : 0.15
+      input.guidance_scale = 3.5
+      console.log(`   ${isModification ? 'Modification' : 'Replication'} mode: prompt_strength ${input.prompt_strength}`)
+    } else if (effectiveModelName === 'sdxl') {
+      input.image = referenceImage
+      // NOTE: SDXL's real parameter is `prompt_strength`, not `denoising_strength`.
+      input.prompt_strength = isModification ? 0.5 : 0.3
     }
   }
-  
+
   try {
-    console.log(`🎨 Generating with ${modelName}${useReference ? ' (with reference image)' : ' (prompt only)'}...`)
-    
+    console.log(`🎨 Generating with ${effectiveModelName}${useReference ? ' (with reference image)' : ' (prompt only)'}...`)
+
     const prediction = await replicate.predictions.create({
       version: configModel.version,
       input: input,
@@ -238,7 +274,7 @@ export async function generateImageWithReplicate(prompt, modelName = 'flux-schne
     return {
       success: true,
       url: localUrl,
-      model: modelName,
+      model: effectiveModelName,
       used_reference: useReference,
     }
     
