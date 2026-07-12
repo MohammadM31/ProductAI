@@ -1,3 +1,4 @@
+// config/index.js
 import 'dotenv/config'
 import { readFileSync, existsSync } from 'fs'
 
@@ -29,16 +30,29 @@ export const config = {
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
   publicBaseUrl: process.env.PUBLIC_BASE_URL || 'http://localhost:5000',
 
-  deepseek: {
-    apiKey: process.env.DEEPSEEK_API_KEY || '',
-    model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
-    visionModel: process.env.DEEPSEEK_VISION_MODEL || 'deepseek-vl',
-    baseURL: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+  // ============================================================
+  // SWITCH BACK TO OPENAI
+  // ============================================================
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY || '',
+    model: process.env.OPENAI_MODEL || 'gpt-4o',
+    visionModel: process.env.OPENAI_VISION_MODEL || 'gpt-4o',
+    imageModel: process.env.OPENAI_IMAGE_MODEL || 'dall-e-3',
+    audioModel: process.env.OPENAI_AUDIO_MODEL || 'whisper-1',
   },
 
-  deepgram: {
-    apiKey: process.env.DEEPGRAM_API_KEY || '',
-  },
+  // Comment out or remove DeepSeek
+  // deepseek: {
+  //   apiKey: process.env.DEEPSEEK_API_KEY || '',
+  //   model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+  //   visionModel: process.env.DEEPSEEK_VISION_MODEL || 'deepseek-vl',
+  //   baseURL: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+  // },
+
+  // Comment out or remove Deepgram
+  // deepgram: {
+  //   apiKey: process.env.DEEPGRAM_API_KEY || '',
+  // },
 
   replicate: {
     apiKey: process.env.REPLICATE_API_TOKEN || '',

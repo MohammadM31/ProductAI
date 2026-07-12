@@ -1,3 +1,4 @@
+// services/aiService.js
 import OpenAI from 'openai'
 import { config } from '../config/index.js'
 import { searchDocuments, indexDocument, getDocument } from './databaseService.js'
@@ -12,17 +13,23 @@ import { fileURLToPath } from 'url'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-let deepseekClient = null
+// ============================================================
+// SWITCH BACK TO OPENAI
+// ============================================================
+let openaiClient = null
 
-function getDeepSeek() {
-  if (!deepseekClient) {
-    deepseekClient = new OpenAI({
-      apiKey: config.deepseek.apiKey,
-      baseURL: config.deepseek.baseURL || 'https://api.deepseek.com',
+function getOpenAI() {
+  if (!openaiClient) {
+    openaiClient = new OpenAI({
+      apiKey: config.openai.apiKey,
     })
   }
-  return deepseekClient
+  return openaiClient
 }
+
+// Remove DeepSeek client
+// let deepseekClient = null
+// function getDeepSeek() { ... }
 
 // ============================================================
 // FAST MAPPING - Keyword-based matching (always runs first)
@@ -37,7 +44,6 @@ export async function fastMapRequest(requestText) {
   const lowerRequest = requestText.toLowerCase()
   const words = lowerRequest.split(/\s+/).filter(w => w.length > 3)
   
-  // Score each project based on keyword matches
   const scored = projects.map(project => {
     let score = 0
     const keywords = (project.trigger_keywords || '').toLowerCase().split(/\s+/)
@@ -45,7 +51,6 @@ export async function fastMapRequest(requestText) {
     const description = (project.description || '').toLowerCase()
     const criteria = (project.reference_criteria || '').toLowerCase()
     
-    // Check each word against project keywords
     for (const word of words) {
       if (keywords.some(kw => kw.includes(word) || word.includes(kw))) {
         score += 3
@@ -78,10 +83,10 @@ export async function fastMapRequest(requestText) {
 }
 
 // ============================================================
-// AI MAPPING - DeepSeek-based matching (fallback)
+// AI MAPPING - OpenAI-based matching (fallback)
 // ============================================================
 async function aiMapRequest(requestText) {
-  console.log('🧠 Using AI for project mapping...')
+  console.log('🧠 Using OpenAI for project mapping...')
   
   const projects = await cache.getProjects()
   if (projects.length === 0) return null
@@ -91,7 +96,6 @@ async function aiMapRequest(requestText) {
   const deptMap = {}
   departments.forEach(d => { deptMap[d.id] = d.name })
   
-  // Build project list for AI
   const projectList = projects.map(p => {
     const deptName = deptMap[p.department_id] || 'Unassigned'
     return `ID: ${p.id}\nName: ${p.name}\nDepartment: ${deptName}\nDescription: ${p.description || 'No description'}\nKeywords: ${p.trigger_keywords || ''}\n---`
@@ -106,9 +110,9 @@ USER REQUEST: "${requestText}"
 
 Reply with ONLY the project ID. No explanation.`
 
-  const deepseek = getDeepSeek()
-  const resp = await deepseek.chat.completions.create({
-    model: config.deepseek.model || 'deepseek-chat',
+  const openai = getOpenAI()
+  const resp = await openai.chat.completions.create({
+    model: config.openai.model || 'gpt-4o',
     max_tokens: 20,
     temperature: 0.1,
     messages: [
@@ -122,22 +126,20 @@ Reply with ONLY the project ID. No explanation.`
   
   if (matchedProject) {
     const deptName = deptMap[matchedProject.department_id] || 'Unknown'
-    console.log(`✅ AI matched: "${matchedProject.name}" (${deptName})`)
+    console.log(`✅ OpenAI matched: "${matchedProject.name}" (${deptName})`)
     return matchedProject
   }
   
-  // Fallback to first project
-  console.log('⚠️ AI returned invalid ID, using first project')
+  console.log('⚠️ OpenAI returned invalid ID, using first project')
   return projects[0]
 }
 
 // ============================================================
-// MAIN MAPPING FUNCTION - Fast + AI with timeout
+// MAIN MAPPING FUNCTION - Fast + OpenAI with timeout
 // ============================================================
 export async function mapRequestToProject(requestText, timeout = 3000) {
   console.log('🤖 Mapping request:', requestText.substring(0, 50) + '...')
   
-  // Step 1: Try fast keyword matching first (always)
   const fastMatch = await fastMapRequest(requestText)
   if (fastMatch) {
     const deptName = await getDepartmentName(fastMatch.department_id)
@@ -145,25 +147,22 @@ export async function mapRequestToProject(requestText, timeout = 3000) {
     return fastMatch
   }
   
-  // Step 2: If fast match didn't work, try AI with timeout
   try {
-    console.log('⏳ Fast match not found, trying AI mapping with timeout...')
+    console.log('⏳ Fast match not found, trying OpenAI mapping with timeout...')
     
     const result = await Promise.race([
       aiMapRequest(requestText),
       new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('AI mapping timeout')), timeout)
+        setTimeout(() => reject(new Error('OpenAI mapping timeout')), timeout)
       )
     ])
     
     return result
   } catch (err) {
-    console.warn('⚠️ AI mapping timed out or failed, using fallback:', err.message)
-    // Fallback to fast match again (will return best available)
+    console.warn('⚠️ OpenAI mapping timed out or failed, using fallback:', err.message)
     const fallback = await fastMapRequest(requestText)
     if (fallback) return fallback
     
-    // Ultimate fallback: return first project
     const projects = await cache.getProjects()
     if (projects.length > 0) {
       console.log(`📋 Ultimate fallback: using "${projects[0].name}"`)
@@ -189,7 +188,7 @@ async function getDepartmentName(departmentId) {
 }
 
 // ============================================================
-// QUICK MAPPING FOR FALLBACK (original)
+// QUICK MAPPING FOR FALLBACK
 // ============================================================
 export async function quickMapRequest(requestText) {
   const projects = await cache.getProjects()
@@ -292,10 +291,10 @@ async function detectImageCategory(userRequest, availableCategories) {
     return availableCategories[0] || null
   }
 
-  const deepseek = getDeepSeek()
+  const openai = getOpenAI()
   try {
-    const resp = await deepseek.chat.completions.create({
-      model: config.deepseek.model || 'deepseek-chat',
+    const resp = await openai.chat.completions.create({
+      model: config.openai.model || 'gpt-4o',
       max_tokens: 20,
       temperature: 0,
       messages: [
@@ -363,7 +362,7 @@ async function convertBase64ToPublicUrl(base64Data, filename = null) {
 // Generate Image Output with Dynamic Vision Analysis
 // ============================================================
 async function generateImageOutput(userRequest, project) {
-  const deepseek = getDeepSeek()
+  const openai = getOpenAI()
   const systemPrompt = buildSystemPrompt(project)
 
   let matchedImages = []
@@ -392,7 +391,6 @@ async function generateImageOutput(userRequest, project) {
       matchedImages = productImages
     }
 
-    // CRITICAL FIX: Convert base64 data URL to a public URL
     if (matchedImages[0] && matchedImages[0].url) {
       const imageUrl = matchedImages[0].url
       
@@ -416,11 +414,11 @@ async function generateImageOutput(userRequest, project) {
       }
     }
 
-    // Analyze ALL matched product images
+    // Analyze ALL matched product images using OpenAI Vision
     try {
-      console.log(`🖼️ Analyzing ${matchedImages.length} product reference image(s)...`)
+      console.log(`🖼️ Analyzing ${matchedImages.length} product reference image(s) with OpenAI Vision...`)
       const descriptions = await Promise.all(
-        matchedImages.map(img => analyzeImageWithDeepSeek(img.url))
+        matchedImages.map(img => analyzeImageWithOpenAI(img.url))
       )
       imageDescription = descriptions
         .map((desc, i) => `Reference ${i + 1} (${matchedImages[i].name}): ${desc}`)
@@ -436,7 +434,7 @@ async function generateImageOutput(userRequest, project) {
     try {
       console.log(`🎨 Analyzing ${styleImages.length} style/vibe reference image(s)...`)
       const styleDescriptions = await Promise.all(
-        styleImages.map(img => analyzeImageWithDeepSeek(img.url))
+        styleImages.map(img => analyzeImageWithOpenAI(img.url))
       )
       styleDescription = styleDescriptions
         .map((desc, i) => `Style Reference ${i + 1} (${styleImages[i].name}): ${desc}`)
@@ -448,11 +446,11 @@ async function generateImageOutput(userRequest, project) {
     }
   }
 
-  // Generate prompt
+  // Generate prompt using OpenAI
   let promptResponse
   try {
-    promptResponse = await deepseek.chat.completions.create({
-      model: config.deepseek.model || 'deepseek-chat',
+    promptResponse = await openai.chat.completions.create({
+      model: config.openai.model || 'gpt-4o',
       max_tokens: 600,
       messages: [
         {
@@ -608,15 +606,15 @@ async function finalizeImageOutput({ project, imageUrl, imagePrompt, modelName, 
 }
 
 // ============================================================
-// Generate Text Output
+// Generate Text Output using OpenAI
 // ============================================================
 async function generateTextOutput(userRequest, project) {
-  const deepseek = getDeepSeek()
+  const openai = getOpenAI()
   const systemPrompt = buildSystemPrompt(project)
 
   try {
-    const response = await deepseek.chat.completions.create({
-      model: config.deepseek.model || 'deepseek-chat',
+    const response = await openai.chat.completions.create({
+      model: config.openai.model || 'gpt-4o',
       max_tokens: 1500,
       messages: [
         {
@@ -646,20 +644,22 @@ async function generateTextOutput(userRequest, project) {
   }
 }
 
-async function analyzeImageWithDeepSeek(imageData) {
-  const deepseek = getDeepSeek()
+// ============================================================
+// Analyze Image with OpenAI Vision (GPT-4o)
+// ============================================================
+async function analyzeImageWithOpenAI(imageData) {
+  const openai = getOpenAI()
   
   try {
     let imageUrl = imageData
     
     // If it's a base64 data URL, use it directly
     if (imageData.startsWith('data:image')) {
-      // DeepSeek can handle base64 data URLs
       imageUrl = imageData
     }
     
-    const response = await deepseek.chat.completions.create({
-      model: config.deepseek.visionModel || 'deepseek-vl',
+    const response = await openai.chat.completions.create({
+      model: config.openai.visionModel || 'gpt-4o',
       max_tokens: 300,
       messages: [
         {
@@ -671,7 +671,10 @@ async function analyzeImageWithDeepSeek(imageData) {
             },
             {
               type: 'image_url',
-              image_url: { url: imageUrl },
+              image_url: {
+                url: imageUrl,
+                detail: 'low'
+              },
             },
           ],
         },
@@ -679,7 +682,7 @@ async function analyzeImageWithDeepSeek(imageData) {
     })
     return response.choices[0].message.content
   } catch (err) {
-    console.warn('⚠️ Image analysis failed:', err.message)
+    console.warn('⚠️ OpenAI Vision analysis failed:', err.message)
     return 'Reference image for style guidance.'
   }
 }
@@ -694,11 +697,11 @@ export async function iterateOutput(originalRequest, feedback, previousContent, 
     return generateImageOutput(`${originalRequest}. Modifications requested: ${feedback}`, project)
   }
 
-  const deepseek = getDeepSeek()
+  const openai = getOpenAI()
   const systemPrompt = buildSystemPrompt(project)
 
-  const response = await deepseek.chat.completions.create({
-    model: config.deepseek.model || 'deepseek-chat',
+  const response = await openai.chat.completions.create({
+    model: config.openai.model || 'gpt-4o',
     max_tokens: 1500,
     messages: [
       { role: 'system', content: systemPrompt },
