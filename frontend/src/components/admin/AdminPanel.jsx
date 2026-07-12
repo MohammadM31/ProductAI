@@ -68,13 +68,20 @@ export default function AdminPanel() {
     loadData()
   }, [])
 
+  // ============================================================
+  // FIXED: loadData - Handles lightweight projects
+  // ============================================================
   const loadData = async () => {
     setLoading(true)
     try {
+      // Always load projects (works for both admin and department users)
       const pData = await adminApi.listProjects()
       console.log('📋 Projects loaded:', pData.projects)
+      
+      // Store the lightweight projects
       setProjects(pData.projects || [])
       
+      // ONLY load departments if user is admin
       if (isAdmin) {
         try {
           const dData = await adminApi.listDepartments()
@@ -85,7 +92,9 @@ export default function AdminPanel() {
           setDepartments([])
         }
       } else {
+        // For department users, create a virtual department from their user info
         if (user?.department_id) {
+          // Try to find the department name from projects
           const deptProjects = (pData.projects || []).filter(p => p.department_id === user.department_id)
           const deptName = deptProjects.length > 0 
             ? deptProjects[0].department_name || 'My Department' 
@@ -101,6 +110,8 @@ export default function AdminPanel() {
           setDepartments([])
         }
       }
+      
+      console.log(`✅ Loaded ${pData.projects.length} projects (lightweight)`)
     } catch (err) {
       console.error('Failed to load data:', err)
       toast.error('Failed to load data')
@@ -239,9 +250,22 @@ export default function AdminPanel() {
     setShowEditor(true)
   }
 
-  const openEdit = (project) => {
-    setEditing(project)
-    setShowEditor(true)
+  // ============================================================
+  // FIXED: openEdit - Fetches full project data for editing
+  // ============================================================
+  const openEdit = async (project) => {
+    try {
+      // Fetch the full project data for editing
+      console.log('📋 Fetching full project data for:', project.id)
+      const fullProject = await adminApi.getProject(project.id)
+      setEditing(fullProject.project)
+      setShowEditor(true)
+    } catch (err) {
+      console.error('Failed to load full project:', err)
+      // Fallback to the light version we have
+      setEditing(project)
+      setShowEditor(true)
+    }
   }
 
   const handleSave = (saved) => {
@@ -255,10 +279,10 @@ export default function AdminPanel() {
   }
 
   // ============================================================
-  // FIXED: Delete handler with proper state management
+  // FIXED: handleDelete - Proper delete with confirmation
   // ============================================================
   const handleDelete = async (id) => {
-    // Check if already deleting
+    // Prevent multiple clicks
     if (isDeleting) return
     
     // Confirm with user
@@ -415,6 +439,11 @@ export default function AdminPanel() {
                             <div className="flex-1 min-w-0">
                               <p className="text-sm text-stone-200 truncate">{project.name}</p>
                               <p className="text-xs text-stone-500 truncate">{project.description}</p>
+                              {project.reference_image_count > 0 && (
+                                <span className="text-xs text-stone-500">
+                                  📷 {project.reference_image_count} images
+                                </span>
+                              )}
                             </div>
                             <ChevronRight size={14} className="text-stone-600 flex-shrink-0" />
                           </button>

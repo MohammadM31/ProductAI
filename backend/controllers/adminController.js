@@ -177,6 +177,9 @@ function findByFuzzyName(list, targetName) {
   return bestScore > 0 ? best : null
 }
 
+// ============================================================
+// FIXED: listProjects - Returns lightweight data for fast loading
+// ============================================================
 export async function listProjects(req, res) {
   try {
     const { role, department_id, id: userId } = req.user
@@ -199,13 +202,61 @@ export async function listProjects(req, res) {
       console.log('📋 Requester sees no projects')
     }
     
-    return res.json({ projects })
+    // ============================================================
+    // STRIP HEAVY DATA - Only return what's needed for the list
+    // ============================================================
+    const lightProjects = projects.map(project => {
+      // Check if reference images contain base64 data
+      let hasBase64Images = false
+      let previewImage = null
+      let referenceImageCount = 0
+      
+      if (Array.isArray(project.reference_images)) {
+        referenceImageCount = project.reference_images.length
+        // Check if any image is base64
+        hasBase64Images = project.reference_images.some(img => 
+          img.url && img.url.startsWith('data:image')
+        )
+        // Get first non-base64 image for preview
+        if (!hasBase64Images && project.reference_images.length > 0) {
+          previewImage = project.reference_images[0].url || null
+        }
+      }
+      
+      return {
+        id: project.id,
+        name: project.name,
+        description: project.description,
+        department_id: project.department_id,
+        output_type: project.output_type || 'image',
+        trigger_keywords: project.trigger_keywords || '',
+        image_model: project.image_model || 'flux-schnell',
+        created_at: project.created_at,
+        updated_at: project.updated_at,
+        created_by: project.created_by,
+        // Counts instead of full data
+        reference_image_count: referenceImageCount,
+        attached_file_count: Array.isArray(project.attached_files) ? project.attached_files.length : 0,
+        // Preview image URL (if exists and not base64)
+        preview_image: previewImage,
+        // Indicate if we stripped base64 images
+        has_base64_images: hasBase64Images,
+      }
+    })
+    
+    const responseSize = JSON.stringify(lightProjects).length
+    console.log(`📋 Returning ${lightProjects.length} lightweight projects (${(responseSize / 1024).toFixed(2)} KB)`)
+    
+    return res.json({ projects: lightProjects })
   } catch (err) {
     console.error('List projects error:', err.message)
     return res.status(500).json({ error: err.message })
   }
 }
 
+// ============================================================
+// getProject - Returns FULL data for editing
+// ============================================================
 export async function getProject(req, res) {
   try {
     const project = await getProjectById(req.params.id)
@@ -283,8 +334,11 @@ export async function updateProjectHandler(req, res) {
 export async function deleteProjectHandler(req, res) {
   try {
     const { role, department_id } = req.user
+    const projectId = req.params.id
     
-    const existingProject = await getProjectById(req.params.id)
+    console.log('🗑️ Delete request for project:', projectId)
+    
+    const existingProject = await getProjectById(projectId)
     if (!existingProject) {
       return res.status(404).json({ error: 'Project not found' })
     }
@@ -293,8 +347,17 @@ export async function deleteProjectHandler(req, res) {
       return res.status(403).json({ error: 'Access denied' })
     }
     
-    await deleteProject(req.params.id)
-    return res.json({ message: 'Project deleted' })
+    await deleteProject(projectId)
+    console.log('✅ Project deleted:', projectId)
+    
+    // Also delete related outputs
+    const outputs = await getOutputsByProject(projectId)
+    for (const output of outputs) {
+      await deleteDocument(config.indices.outputs, output.id)
+    }
+    console.log(`✅ Deleted ${outputs.length} associated outputs`)
+    
+    return res.json({ message: 'Project deleted successfully' })
   } catch (err) {
     console.error('Delete project error:', err.message)
     return res.status(500).json({ error: err.message })
@@ -373,13 +436,11 @@ export async function updateDepartmentHandler(req, res) {
     
     console.log('📝 Updating department:', { id, name, email, password: !!password })
     
-    // Update department basic info
     const department = await updateDepartment(id, { 
       name: name?.trim(), 
       description: description?.trim() 
     })
     
-    // Handle credentials update
     let updatedUser = null
     if (email || password) {
       const users = await searchDocuments(config.indices.users, {
@@ -390,7 +451,6 @@ export async function updateDepartmentHandler(req, res) {
         const user = users[0]
         const updates = {}
         
-        // Update email if provided and different
         if (email && email.trim() && email !== user.email) {
           const existingUser = await searchDocuments(config.indices.users, {
             query: { term: { email: email.toLowerCase() } },
@@ -403,7 +463,6 @@ export async function updateDepartmentHandler(req, res) {
           console.log('📧 Updating email to:', email)
         }
         
-        // Update password if provided
         if (password && password.trim()) {
           if (password.length < 6) {
             return res.status(400).json({ error: 'Password must be at least 6 characters' })
@@ -413,12 +472,10 @@ export async function updateDepartmentHandler(req, res) {
           console.log('🔑 Updating password')
         }
         
-        // Save updates if any
         if (Object.keys(updates).length > 0) {
           await updateDocument(config.indices.users, user.id, updates)
           console.log('✅ User credentials updated')
           
-          // Get updated user
           const updatedUsers = await searchDocuments(config.indices.users, {
             query: { term: { department_id: id } },
           })
@@ -429,7 +486,6 @@ export async function updateDepartmentHandler(req, res) {
           updatedUser = user
         }
       } else if (email && password) {
-        // Create new user if none exists
         console.log('🆕 Creating new user for department')
         const hashedPassword = await bcrypt.hash(password, 10)
         const userId = `user-${id}`
@@ -615,13 +671,12 @@ export async function analyzeReferenceImage(req, res) {
   }
 
   try {
-    const deepseek = new OpenAI({
-      apiKey: config.deepseek.apiKey,
-      baseURL: config.deepseek.baseURL || 'https://api.deepseek.com',
+    const openai = new OpenAI({
+      apiKey: config.openai.apiKey,
     })
     
-    const response = await deepseek.chat.completions.create({
-      model: config.deepseek.visionModel || 'deepseek-vl',
+    const response = await openai.chat.completions.create({
+      model: config.openai.visionModel || 'gpt-4o',
       max_tokens: 300,
       messages: [
         {
@@ -643,6 +698,7 @@ export async function analyzeReferenceImage(req, res) {
               type: 'image_url',
               image_url: {
                 url: image,
+                detail: 'low'
               },
             },
           ],
