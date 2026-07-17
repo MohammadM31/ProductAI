@@ -332,45 +332,37 @@ async function generateImageOutput(userRequest, project, previousImageUrl = null
 
   // Determine if this is an iteration (we have a previous image)
   const isIteration = !!previousImageUrl
-  
-  // Higher strength for iterations to preserve more of the original
-  const strength = isIteration ? 0.85 : 0.70
-  
-  console.log(`🎯 Using strength: ${strength} (${isIteration ? 'iteration - high preservation' : 'first generation - moderate preservation'})`)
 
   // ============================================================
   // USE USER'S REQUEST EXACTLY AS-IS
   // ============================================================
   console.log('📝 Using user\'s request EXACTLY as-is:', userRequest)
   console.log(`   Reference image: ${referenceImageUrl || 'None (prompt-only)'}`)
-  
+  console.log(`   ${isIteration ? 'Iterating on previous image' : 'First generation'}`)
+
   try {
-    console.log(`🎨 Generating image with Nano Banana 2...`)
-    
+    console.log(`🎨 Generating image with Nano Banana...`)
+
     const result = await generateImage(userRequest, {
       referenceImage: referenceImageUrl,
-      width: 1024,
-      height: 1024,
-      enhancePrompt: false,
-      strength: strength,
     }, true)
-    
+
     if (!result.url || typeof result.url !== 'string') {
       console.error('❌ Invalid image URL received:', result.url)
-      throw new Error('Invalid image URL received from Nano Banana 2')
+      throw new Error('Invalid image URL received from Nano Banana')
     }
 
     return await finalizeImageOutput({
       project,
       imageUrl: result.url,
       imagePrompt: userRequest,
-      modelName: 'nano-banana-2',
+      modelName: result.model || 'nano-banana',
       isSvgModel: false,
       referenceImageUrl,
       fallback: false,
     })
   } catch (err) {
-    console.error('❌ Nano Banana 2 generation failed:', err.message)
+    console.error('❌ Nano Banana generation failed:', err.message)
     
     console.log('🔄 Trying Replicate fallback...')
     try {

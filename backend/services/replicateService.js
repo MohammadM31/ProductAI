@@ -140,6 +140,18 @@ const MODEL_CONFIGS = {
     },
     supportsReference: true,
   },
+  // Google's Gemini 2.5 Flash Image model, aka "Nano Banana". This is
+  // an editing-focused model: given a reference image + a prompt, it
+  // applies the requested change directly onto that image rather than
+  // generating a brand new scene from scratch.
+  'nano-banana': {
+    version: 'google/nano-banana',
+    input: {
+      prompt: '',
+      output_format: 'png',
+    },
+    supportsReference: true,
+  },
 }
 
 // Models that genuinely accept a reference/input image on Replicate.
@@ -150,6 +162,7 @@ const REFERENCE_CAPABLE_MODELS = new Set([
   'sdxl',
   'flux-kontext-pro',
   'flux-kontext-max',
+  'nano-banana',
 ])
 
 // ============================================================
@@ -201,7 +214,12 @@ export async function generateImageWithReplicate(prompt, modelName = 'flux-schne
   input.prompt = prompt
 
   if (useReference) {
-    if (effectiveModelName === 'flux-kontext-pro' || effectiveModelName === 'flux-kontext-max') {
+    if (effectiveModelName === 'nano-banana') {
+      // Nano Banana takes reference images as an array and edits them
+      // directly according to the prompt (e.g. "put this product on a
+      // beach" applied straight onto the uploaded reference image).
+      input.image_input = [referenceImage]
+    } else if (effectiveModelName === 'flux-kontext-pro' || effectiveModelName === 'flux-kontext-max') {
       // Kontext models take the reference as `input_image` and edit it
       // directly based on the prompt instructions — this is the model
       // family built for "keep the product, change the context" edits.

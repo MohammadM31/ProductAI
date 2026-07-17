@@ -39,18 +39,22 @@ export const config = {
   },
 
   // ============================================================
-  // NANO BANANA 2 CONFIG
+  // NANO BANANA CONFIG
+  // Nano Banana (Google's Gemini 2.5 Flash Image model) is served
+  // through Replicate as "google/nano-banana" — there is no separate
+  // api.nanobanana.ai service. It uses the same Replicate credentials.
   // ============================================================
   nanobanana: {
-    apiKey: process.env.NANOBANANA_API_KEY || '',
-    model: process.env.NANOBANANA_MODEL || 'nano-banana-2',
-    baseUrl: process.env.NANOBANANA_BASE_URL || 'https://api.nanobanana.ai/v1',
-    maxTokens: parseInt(process.env.NANOBANANA_MAX_TOKENS || '4096', 10),
+    model: process.env.NANOBANANA_MODEL || 'google/nano-banana',
   },
 
-  // Replicate as fallback
+  // Replicate (primary image generation provider, incl. Nano Banana)
   replicate: {
-    apiKey: process.env.REPLICATE_API_TOKEN || '',
+    // Support both env var names — the deployed .env uses REPLICATE_API_KEY,
+    // some docs/examples use REPLICATE_API_TOKEN. Previously only the
+    // latter was read, so the key from .env was silently ignored and
+    // every Replicate call (including Nano Banana) failed auth.
+    apiKey: process.env.REPLICATE_API_TOKEN || process.env.REPLICATE_API_KEY || '',
     imageModel: process.env.REPLICATE_IMAGE_MODEL || 'flux-schnell',
   },
 
@@ -86,7 +90,7 @@ console.log('🔌 OpenSearch Configuration:', {
 })
 
 console.log('🖼️ Image Generation:', {
-  provider: config.nanobanana.apiKey ? 'Nano Banana 2 (primary)' : 'Replicate (fallback)',
-  hasNanobananaKey: !!config.nanobanana.apiKey,
+  provider: config.replicate.apiKey ? 'Nano Banana via Replicate (primary)' : 'NOT CONFIGURED',
+  nanobananaModel: config.nanobanana.model,
   hasReplicateKey: !!config.replicate.apiKey,
 })
