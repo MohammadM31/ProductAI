@@ -3,7 +3,7 @@ import OpenAI from 'openai'
 import { config } from '../config/index.js'
 import { searchDocuments, indexDocument, getDocument } from './databaseService.js'
 import { v4 as uuidv4 } from 'uuid'
-import { generateImageWithReplicate, generateImageWithFallback } from './replicateService.js'
+import { generateImage } from './nanobananaService.js'
 import { buildLayeredPsd } from './psdService.js'
 import { cache } from './cacheService.js'
 import fs from 'fs'
@@ -13,9 +13,6 @@ import { fileURLToPath } from 'url'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-// ============================================================
-// SWITCH BACK TO OPENAI
-// ============================================================
 let openaiClient = null
 
 function getOpenAI() {
@@ -27,12 +24,8 @@ function getOpenAI() {
   return openaiClient
 }
 
-// Remove DeepSeek client
-// let deepseekClient = null
-// function getDeepSeek() { ... }
-
 // ============================================================
-// FAST MAPPING - Keyword-based matching (always runs first)
+// FAST MAPPING - Keyword-based matching
 // ============================================================
 export async function fastMapRequest(requestText) {
   console.log('⚡ Using fast mapping for:', requestText.substring(0, 50) + '...')
@@ -49,7 +42,6 @@ export async function fastMapRequest(requestText) {
     const keywords = (project.trigger_keywords || '').toLowerCase().split(/\s+/)
     const name = (project.name || '').toLowerCase()
     const description = (project.description || '').toLowerCase()
-    const criteria = (project.reference_criteria || '').toLowerCase()
     
     for (const word of words) {
       if (keywords.some(kw => kw.includes(word) || word.includes(kw))) {
@@ -59,9 +51,6 @@ export async function fastMapRequest(requestText) {
         score += 2
       }
       if (description.includes(word)) {
-        score += 1
-      }
-      if (criteria.includes(word)) {
         score += 1
       }
     }
@@ -135,7 +124,7 @@ Reply with ONLY the project ID. No explanation.`
 }
 
 // ============================================================
-// MAIN MAPPING FUNCTION - Fast + OpenAI with timeout
+// MAIN MAPPING FUNCTION
 // ============================================================
 export async function mapRequestToProject(requestText, timeout = 3000) {
   console.log('🤖 Mapping request:', requestText.substring(0, 50) + '...')
@@ -229,97 +218,15 @@ export async function quickMapRequest(requestText) {
 }
 
 // ============================================================
-// Helper: Build System Prompt
-// ============================================================
-function buildSystemPrompt(project) {
-  let systemPrompt = project.system_prompt || ''
-  
-  if (project.attached_files && project.attached_files.length > 0) {
-    systemPrompt += '\n\n=== REFERENCE DOCUMENTS ===\n'
-    project.attached_files.forEach((file, index) => {
-      if (!file.content) return
-      
-      systemPrompt += `\n--- Document ${index + 1}: ${file.name} (${file.type}) ---\n`
-      
-      if (file.type && (file.type.includes('text') || file.type.includes('json') || file.type.includes('javascript'))) {
-        systemPrompt += `${file.content}\n`
-      } else if (file.type && file.type.includes('image')) {
-        systemPrompt += `[Image uploaded: ${file.name} - use as visual reference for style, composition, and quality]\n`
-      } else if (file.content) {
-        systemPrompt += `${file.content}\n`
-      }
-    })
-    systemPrompt += '\n=== END REFERENCE DOCUMENTS ===\n'
-  }
-  
-  if (project.reference_criteria) {
-    systemPrompt += `\n=== VISUAL REFERENCE CRITERIA ===\n${project.reference_criteria}\n=== END VISUAL REFERENCE CRITERIA ===\n`
-  }
-  
-  if (project.reference_images && project.reference_images.length > 0) {
-    systemPrompt += '\n=== REFERENCE IMAGES ===\n'
-    project.reference_images.forEach((img, i) => {
-      systemPrompt += `${i+1}. ${img.name}`
-      if (img.description) {
-        systemPrompt += ` - ${img.description}`
-      }
-      if (img.style_analysis) {
-        systemPrompt += `\n   Style: ${img.style_analysis}`
-      }
-      systemPrompt += '\n'
-    })
-    systemPrompt += '=== END REFERENCE IMAGES ===\n'
-  }
-  
-  return systemPrompt
-}
-
-// ============================================================
 // Generate Output
 // ============================================================
-export async function generateOutput(userRequest, project) {
+export async function generateOutput(userRequest, project, previousImageUrl = null) {
   const outputType = project.output_type || 'image'
   
   if (outputType === 'image' || outputType === 'psd' || outputType === 'svg') {
-    return generateImageOutput(userRequest, project)
+    return generateImageOutput(userRequest, project, previousImageUrl)
   }
   return generateTextOutput(userRequest, project)
-}
-
-async function detectImageCategory(userRequest, availableCategories) {
-  if (availableCategories.length <= 1) {
-    return availableCategories[0] || null
-  }
-
-  const openai = getOpenAI()
-  try {
-    const resp = await openai.chat.completions.create({
-      model: config.openai.model || 'gpt-4o',
-      max_tokens: 20,
-      temperature: 0,
-      messages: [
-        {
-          role: 'system',
-          content: `Classify the user's request into exactly one of these categories: ${availableCategories.join(', ')}. Reply with ONLY the category name, nothing else.`,
-        },
-        { role: 'user', content: userRequest },
-      ],
-    })
-    const category = resp.choices[0].message.content.trim().toLowerCase()
-    if (availableCategories.includes(category)) {
-      console.log(`🏷️ Detected category: "${category}"`)
-      return category
-    }
-  } catch (err) {
-    console.warn('⚠️ Category detection failed:', err.message)
-  }
-
-  const lower = userRequest.toLowerCase()
-  const coldWords = ['iced', 'ice', 'cold', 'frozen', 'chilled']
-  const hotWords = ['hot', 'warm', 'steaming']
-  if (coldWords.some(w => lower.includes(w)) && availableCategories.includes('cold')) return 'cold'
-  if (hotWords.some(w => lower.includes(w)) && availableCategories.includes('hot')) return 'hot'
-  return availableCategories[0]
 }
 
 // ============================================================
@@ -347,7 +254,7 @@ async function convertBase64ToPublicUrl(base64Data, filename = null) {
     if (!base && config.nodeEnv === 'production') {
       console.error(
         '❌ PUBLIC_BASE_URL is not set! This reference image will be saved with an ' +
-        'unreachable "http://localhost:5000" URL, and Replicate will NOT be able to fetch it.'
+        'unreachable "http://localhost:5000" URL, and the image generator will NOT be able to fetch it.'
       )
     }
     const publicUrl = `${(base || 'http://localhost:5000').replace(/\/$/, '')}/uploads/reference_images/${name}`
@@ -359,206 +266,126 @@ async function convertBase64ToPublicUrl(base64Data, filename = null) {
 }
 
 // ============================================================
-// Generate Image Output with Dynamic Vision Analysis
+// Get the full public URL for an image
 // ============================================================
-async function generateImageOutput(userRequest, project) {
-  const openai = getOpenAI()
-  const systemPrompt = buildSystemPrompt(project)
+function getFullImageUrl(url) {
+  if (!url) return null
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return url
+  }
+  if (url.startsWith('/uploads/')) {
+    const base = process.env.PUBLIC_BASE_URL || 'http://localhost:5000'
+    return `${base.replace(/\/$/, '')}${url}`
+  }
+  if (url.startsWith('uploads/')) {
+    const base = process.env.PUBLIC_BASE_URL || 'http://localhost:5000'
+    return `${base.replace(/\/$/, '')}/${url}`
+  }
+  return url
+}
 
-  let matchedImages = []
+// ============================================================
+// Generate Image Output - Uses previous image as reference if available
+// ============================================================
+async function generateImageOutput(userRequest, project, previousImageUrl = null) {
+  // Get reference image URL - PRIORITIZE previous generated image
   let referenceImageUrl = null
-  let imageDescription = ''
-  let styleDescription = ''
-
-  const allRefs = project.reference_images || []
-  const productImages = allRefs.filter(img => img.ref_type !== 'style')
-  const styleImages = allRefs.filter(img => img.ref_type === 'style')
-
-  if (productImages.length > 0) {
-    const categories = [...new Set(
-      productImages.map(img => (img.category || 'general').toLowerCase())
-    )]
-
-    const targetCategory = await detectImageCategory(userRequest, categories)
-
-    matchedImages = targetCategory
-      ? productImages.filter(
-          img => (img.category || 'general').toLowerCase() === targetCategory
-        )
-      : productImages
-
-    if (matchedImages.length === 0) {
-      matchedImages = productImages
+  
+  // 1. Check if we have a previous generated image to use as reference
+  if (previousImageUrl) {
+    const fullUrl = getFullImageUrl(previousImageUrl)
+    if (fullUrl && (fullUrl.startsWith('http://') || fullUrl.startsWith('https://'))) {
+      referenceImageUrl = fullUrl
+      console.log(`📸 Using previous generated image as reference: ${referenceImageUrl.substring(0, 80)}...`)
     }
-
-    if (matchedImages[0] && matchedImages[0].url) {
-      const imageUrl = matchedImages[0].url
+  }
+  
+  // 2. If no previous image, fall back to project reference images
+  if (!referenceImageUrl) {
+    const allRefs = project.reference_images || []
+    const productImages = allRefs.filter(img => img.ref_type !== 'style')
+    
+    if (productImages.length > 0 && productImages[0]?.url) {
+      const imageUrl = productImages[0].url
       
       if (imageUrl.startsWith('data:image')) {
         console.log('🔄 Converting base64 reference image to public URL...')
         const publicUrl = await convertBase64ToPublicUrl(
           imageUrl, 
-          matchedImages[0].name || `ref_${uuidv4()}.png`
+          productImages[0].name || `ref_${uuidv4()}.png`
         )
         if (publicUrl) {
           referenceImageUrl = publicUrl
           console.log(`✅ Saved reference image to public URL: ${referenceImageUrl}`)
-        } else {
-          console.log('⚠️ Failed to convert base64, using prompt-only generation')
         }
       } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
         referenceImageUrl = imageUrl
-        console.log(`📸 Using reference image URL: ${referenceImageUrl.substring(0, 80)}...`)
-      } else {
-        console.log(`⚠️ Unknown reference image format: ${imageUrl.substring(0, 50)}...`)
+        console.log(`📸 Using project reference image: ${referenceImageUrl.substring(0, 80)}...`)
       }
     }
-
-    // Analyze ALL matched product images using OpenAI Vision
-    try {
-      console.log(`🖼️ Analyzing ${matchedImages.length} product reference image(s) with OpenAI Vision...`)
-      const descriptions = await Promise.all(
-        matchedImages.map(img => analyzeImageWithOpenAI(img.url))
-      )
-      imageDescription = descriptions
-        .map((desc, i) => `Reference ${i + 1} (${matchedImages[i].name}): ${desc}`)
-        .join('\n\n')
-      console.log('📸 Combined reference understanding:', imageDescription.substring(0, 200) + '...')
-    } catch (err) {
-      console.warn('⚠️ Image analysis failed:', err.message)
-      imageDescription = 'Reference images provided. Match their style, colors, and composition.'
-    }
   }
 
-  if (styleImages.length > 0) {
-    try {
-      console.log(`🎨 Analyzing ${styleImages.length} style/vibe reference image(s)...`)
-      const styleDescriptions = await Promise.all(
-        styleImages.map(img => analyzeImageWithOpenAI(img.url))
-      )
-      styleDescription = styleDescriptions
-        .map((desc, i) => `Style Reference ${i + 1} (${styleImages[i].name}): ${desc}`)
-        .join('\n\n')
-      console.log('🌈 Combined style understanding:', styleDescription.substring(0, 200) + '...')
-    } catch (err) {
-      console.warn('⚠️ Style image analysis failed:', err.message)
-      styleDescription = ''
-    }
+  // 3. If still no reference, use prompt-only mode
+  if (!referenceImageUrl) {
+    console.log('⚠️ No reference image available, using prompt-only generation')
   }
 
-  // Generate prompt using OpenAI
-  let promptResponse
+  // Determine if this is an iteration (we have a previous image)
+  const isIteration = !!previousImageUrl
+  
+  // Higher strength for iterations to preserve more of the original
+  const strength = isIteration ? 0.85 : 0.70
+  
+  console.log(`🎯 Using strength: ${strength} (${isIteration ? 'iteration - high preservation' : 'first generation - moderate preservation'})`)
+
+  // ============================================================
+  // USE USER'S REQUEST EXACTLY AS-IS
+  // ============================================================
+  console.log('📝 Using user\'s request EXACTLY as-is:', userRequest)
+  console.log(`   Reference image: ${referenceImageUrl || 'None (prompt-only)'}`)
+  
   try {
-    promptResponse = await openai.chat.completions.create({
-      model: config.openai.model || 'gpt-4o',
-      max_tokens: 600,
-      messages: [
-        {
-          role: 'system',
-          content: `You are an image prompt generator.
-
-${systemPrompt}
-
-${imageDescription ? `
-REFERENCE IMAGE DESCRIPTION (the product — its design must be preserved exactly):
-${imageDescription}
-
-INSTRUCTIONS:
-- Use the reference image description above as your PRIMARY guide for the product itself
-- If the user asks for changes, ONLY change what they ask for
-- Keep everything else about the product exactly as described in the reference
-` : ''}
-
-${styleDescription ? `
-STYLE / VIBE REFERENCE (mood board — describes the FEEL of the shot):
-${styleDescription}
-
-INSTRUCTIONS:
-- Borrow ONLY the mood, background setting, lighting, and color palette from this style reference
-- Do NOT copy any product shown in the style reference
-` : ''}
-
-Generate a single, detailed image prompt. No extra text.`
-        },
-        {
-          role: 'user',
-          content: `User Request: "${userRequest}"
-
-${imageDescription ? `
-Based on the reference image description above, create a prompt that:
-1. Preserves the core elements from the reference
-2. ONLY modifies what the user requested
-3. Keeps everything else the same
-${styleDescription ? '4. Wraps the product in the mood/background described in the STYLE / VIBE REFERENCE\n' : ''}` : `
-Create a prompt based on the user's request.
-`}`
-        },
-      ],
-    })
-  } catch (apiError) {
-    console.error('❌ Prompt generation API error:', apiError.message)
-    if (apiError.status === 402) {
-      return {
-        output_type: 'image',
-        content: '/uploads/images/fallback-placeholder.png',
-        dalle_prompt: userRequest,
-        model_used: 'fallback',
-        error: 'AI service unavailable'
-      }
-    }
-    throw apiError
-  }
-
-  const imagePrompt = promptResponse.choices[0].message.content.trim()
-  console.log('📝 Generated prompt:', imagePrompt)
-
-  const modelName = project.image_model || process.env.REPLICATE_IMAGE_MODEL || 'flux-schnell'
-  const isSvgModel = modelName.endsWith('-svg')
-
-  try {
-    console.log(`🎨 Generating image with ${modelName}...`)
-    console.log(`   Reference image: ${referenceImageUrl || 'None'}`)
+    console.log(`🎨 Generating image with Nano Banana 2...`)
     
-    const result = await generateImageWithReplicate(
-      imagePrompt, 
-      modelName,
-      referenceImageUrl
-    )
+    const result = await generateImage(userRequest, {
+      referenceImage: referenceImageUrl,
+      width: 1024,
+      height: 1024,
+      enhancePrompt: false,
+      strength: strength,
+    }, true)
     
-    if (!result.url || typeof result.url !== 'string' || result.url === '{}' || result.url.length < 10) {
+    if (!result.url || typeof result.url !== 'string') {
       console.error('❌ Invalid image URL received:', result.url)
-      throw new Error('Invalid image URL received from Replicate')
+      throw new Error('Invalid image URL received from Nano Banana 2')
     }
 
     return await finalizeImageOutput({
       project,
       imageUrl: result.url,
-      imagePrompt,
-      modelName,
-      isSvgModel,
+      imagePrompt: userRequest,
+      modelName: 'nano-banana-2',
+      isSvgModel: false,
       referenceImageUrl,
       fallback: false,
     })
   } catch (err) {
-    console.error('❌ Replicate generation failed:', err.message)
+    console.error('❌ Nano Banana 2 generation failed:', err.message)
     
-    console.log('🔄 Trying fallback models...')
+    console.log('🔄 Trying Replicate fallback...')
     try {
+      const { generateImageWithFallback } = await import('./replicateService.js')
       const fallbackResult = await generateImageWithFallback(
-        imagePrompt,
-        ['flux-schnell', 'flux-dev', 'sdxl'],
+        userRequest,
+        ['flux-dev', 'sdxl'],
         referenceImageUrl
       )
-      
-      if (!fallbackResult.url || typeof fallbackResult.url !== 'string' || fallbackResult.url === '{}') {
-        throw new Error('Invalid fallback image URL')
-      }
       
       return await finalizeImageOutput({
         project,
         imageUrl: fallbackResult.url,
-        imagePrompt,
-        modelName: fallbackResult.model,
+        imagePrompt: userRequest,
+        modelName: fallbackResult.model || 'replicate-fallback',
         isSvgModel: false,
         referenceImageUrl,
         fallback: true,
@@ -606,25 +433,19 @@ async function finalizeImageOutput({ project, imageUrl, imagePrompt, modelName, 
 }
 
 // ============================================================
-// Generate Text Output using OpenAI
+// Generate Text Output
 // ============================================================
 async function generateTextOutput(userRequest, project) {
   const openai = getOpenAI()
-  const systemPrompt = buildSystemPrompt(project)
+  const systemPrompt = project.system_prompt || ''
 
   try {
     const response = await openai.chat.completions.create({
       model: config.openai.model || 'gpt-4o',
       max_tokens: 1500,
       messages: [
-        {
-          role: 'system',
-          content: systemPrompt,
-        },
-        {
-          role: 'user',
-          content: userRequest,
-        },
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userRequest },
       ],
     })
 
@@ -645,67 +466,27 @@ async function generateTextOutput(userRequest, project) {
 }
 
 // ============================================================
-// Analyze Image with OpenAI Vision (GPT-4o)
+// Iterate Output - Uses previous image as reference
 // ============================================================
-async function analyzeImageWithOpenAI(imageData) {
-  const openai = getOpenAI()
-  
-  try {
-    let imageUrl = imageData
-    
-    // If it's a base64 data URL, use it directly
-    if (imageData.startsWith('data:image')) {
-      imageUrl = imageData
-    }
-    
-    const response = await openai.chat.completions.create({
-      model: config.openai.visionModel || 'gpt-4o',
-      max_tokens: 300,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: 'Describe this image in detail including colors, composition, style, mood, and key elements:',
-            },
-            {
-              type: 'image_url',
-              image_url: {
-                url: imageUrl,
-                detail: 'low'
-              },
-            },
-          ],
-        },
-      ],
-    })
-    return response.choices[0].message.content
-  } catch (err) {
-    console.warn('⚠️ OpenAI Vision analysis failed:', err.message)
-    return 'Reference image for style guidance.'
-  }
-}
-
-// ============================================================
-// Iterate Output (revision)
-// ============================================================
-export async function iterateOutput(originalRequest, feedback, previousContent, project) {
+export async function iterateOutput(originalRequest, feedback, previousContent, project, previousImageUrl = null) {
   const outputType = project.output_type || 'image'
   
   if (outputType === 'image' || outputType === 'psd' || outputType === 'svg') {
-    return generateImageOutput(`${originalRequest}. Modifications requested: ${feedback}`, project)
+    // Use ONLY the feedback, and pass the previous image as reference
+    console.log('🔄 Iterating with feedback only:', feedback)
+    console.log(`   Using previous image as reference: ${previousImageUrl ? 'YES' : 'NO'}`)
+    return generateImageOutput(feedback, project, previousImageUrl)
   }
 
+  // For text outputs
   const openai = getOpenAI()
-  const systemPrompt = buildSystemPrompt(project)
+  const systemPrompt = project.system_prompt || ''
 
   const response = await openai.chat.completions.create({
     model: config.openai.model || 'gpt-4o',
     max_tokens: 1500,
     messages: [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: originalRequest },
       { role: 'assistant', content: previousContent },
       {
         role: 'user',

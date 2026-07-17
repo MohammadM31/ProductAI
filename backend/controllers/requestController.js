@@ -43,6 +43,9 @@ export async function processText(req, res) {
   return processRequest(res, text, sessionId, project_id, req.user)
 }
 
+// ============================================================
+// processRequest - No previous image for first request
+// ============================================================
 async function processRequest(res, userText, sessionId, hintProjectId, user) {
   let project = null
   
@@ -88,7 +91,8 @@ async function processRequest(res, userText, sessionId, hintProjectId, user) {
     await trackUserRequest(user.id, project.id, userText)
   }
 
-  const result = await generateOutput(userText, project)
+  // First generation - no previous image
+  const result = await generateOutput(userText, project, null)
 
   const saved = await saveOutput({
     sessionId,
@@ -114,11 +118,16 @@ async function processRequest(res, userText, sessionId, hintProjectId, user) {
     },
     output_type: result.output_type,
     content: result.content,
-    dalle_prompt: result.dalle_prompt,
+    dalle_prompt: result.dalle_prompt || userText,
     model_used: result.model_used,
+    history_index: 0,
+    timestamp: new Date().toISOString(),
   })
 }
 
+// ============================================================
+// iterateRequest - Pass previous image as reference
+// ============================================================
 export async function iterateRequest(req, res) {
   const { output_id, feedback, session_id } = req.body
   if (!output_id || !feedback?.trim()) {
@@ -143,11 +152,17 @@ export async function iterateRequest(req, res) {
     return res.status(404).json({ error: 'Project not found' })
   }
 
+  // Get the previous image URL from the existing output
+  const previousImageUrl = existing.content || null
+  
+  console.log(`🔄 Iterating with previous image: ${previousImageUrl ? 'YES' : 'NO'}`)
+
   const result = await iterateOutput(
     existing.original_request,
     feedback,
     existing.content,
-    project
+    project,
+    previousImageUrl  // ← Pass previous image as reference
   )
 
   if (user && user.id) {
@@ -160,7 +175,7 @@ export async function iterateRequest(req, res) {
     departmentId: project.department_id,
     outputType: result.output_type,
     content: result.content,
-    originalRequest: `${existing.original_request} [Revision: ${feedback}]`,
+    originalRequest: feedback,  // Store only the feedback
     requesterId: existing.requester_id,
     requesterName: existing.requester_name,
     requesterEmail: existing.requester_email,
@@ -175,11 +190,16 @@ export async function iterateRequest(req, res) {
     },
     output_type: result.output_type,
     content: result.content,
-    dalle_prompt: result.dalle_prompt,
+    dalle_prompt: feedback,
     model_used: result.model_used,
+    history_index: 0,
+    timestamp: new Date().toISOString(),
   })
 }
 
+// ============================================================
+// confirmOutput
+// ============================================================
 export async function confirmOutput(req, res) {
   const { output_id } = req.body
   if (!output_id) return res.status(400).json({ error: 'output_id required' })
@@ -230,6 +250,9 @@ export async function confirmOutput(req, res) {
   return res.json({ message: 'Output confirmed and sent to department.' })
 }
 
+// ============================================================
+// previewProjectMapping
+// ============================================================
 export async function previewProjectMapping(req, res) {
   const { text } = req.body
   if (!text?.trim()) {
@@ -276,6 +299,9 @@ export async function previewProjectMapping(req, res) {
   }
 }
 
+// ============================================================
+// getMyOutputs
+// ============================================================
 export async function getMyOutputs(req, res) {
   const user = req.user
   
@@ -305,10 +331,14 @@ export async function getMyOutputs(req, res) {
   }
 }
 
+// ============================================================
+// getPersonalizedSuggestions
+// ============================================================
 export async function getPersonalizedSuggestions(req, res) {
   try {
     const userId = req.user.id
-    const suggestions = await getSuggestions(userId)
+    const limit = parseInt(req.query.limit) || 2
+    const suggestions = await getSuggestions(userId, limit)
     return res.json({ suggestions })
   } catch (err) {
     console.error('Error getting suggestions:', err.message)
@@ -316,6 +346,9 @@ export async function getPersonalizedSuggestions(req, res) {
   }
 }
 
+// ============================================================
+// debugImageContent
+// ============================================================
 export async function debugImageContent(req, res) {
   const { output_id } = req.params
   
@@ -347,6 +380,9 @@ export async function debugImageContent(req, res) {
   }
 }
 
+// ============================================================
+// debugAllOutputs
+// ============================================================
 export async function debugAllOutputs(req, res) {
   const user = req.user
   

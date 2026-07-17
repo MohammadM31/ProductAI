@@ -9,7 +9,7 @@ import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 
 export default function RequesterView() {
-  const { state, dispatch, goBack, goForward, canGoBack, canGoForward } = useApp()
+  const { state, dispatch } = useApp()
   const { 
     currentOutput, 
     requestStatus, 
@@ -19,9 +19,7 @@ export default function RequesterView() {
     inputMode: persistedInputMode,
     showGuidelines: persistedShowGuidelines,
     panelWidth: persistedPanelWidth,
-    user,
-    imageHistory,
-    historyIndex,
+    user
   } = state
 
   const [textInput, setTextInput] = useState(persistedTextInput || '')
@@ -316,17 +314,10 @@ export default function RequesterView() {
           onIterate={handleIterate}
           onConfirm={handleConfirm}
           disabled={isProcessing}
-          onGoBack={goBack}
-          onGoForward={goForward}
-          canGoBack={canGoBack}
-          canGoForward={canGoForward}
-          historyIndex={historyIndex}
-          historyLength={imageHistory.length}
         />
       </div>
     )
   }
-
 
   // ============================================================
   // Main View with Department Display and Personalized Suggestions
@@ -505,55 +496,73 @@ export default function RequesterView() {
 
         {/* Personalized Suggestions */}
         <div className="grid grid-cols-1 gap-2 w-full text-sm">
-  {loadingSuggestions ? (
-    <div className="text-stone-400 text-center py-4 flex items-center justify-center gap-2">
-      <Loader2 size={16} className="animate-spin text-amber-400" />
-      Loading suggestions...
-    </div>
-  ) : suggestions.length > 0 ? (
-    suggestions.slice(0, 2).map((suggestion, index) => (  // ← Slice to 2
-      <button
-        key={index}
-        onClick={() => {
-          setTextInput(suggestion.text)
-          setInputMode('text')
-        }}
-        className="text-left bg-stone-800/50 border border-stone-700 hover:border-amber-500/40 hover:bg-stone-800 rounded-xl px-4 py-3 text-stone-400 hover:text-stone-200 transition-all group"
-      >
-        <div className="flex items-center gap-2">
-          {suggestion.frequency && (
-            <span className="text-xs text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full flex-shrink-0">
-              ⭐ {suggestion.frequency}x
-            </span>
+          {loadingSuggestions ? (
+            <div className="text-stone-400 text-center py-4 flex items-center justify-center gap-2">
+              <Loader2 size={16} className="animate-spin text-amber-400" />
+              Loading suggestions...
+            </div>
+          ) : suggestions.length > 0 ? (
+            suggestions.map((suggestion, index) => (
+              <button
+                key={index}
+                onClick={() => {
+                  setTextInput(suggestion.text)
+                  setInputMode('text')
+                }}
+                className="text-left bg-stone-800/50 border border-stone-700 hover:border-amber-500/40 hover:bg-stone-800 rounded-xl px-4 py-3 text-stone-400 hover:text-stone-200 transition-all group"
+              >
+                <div className="flex items-center gap-2">
+                  {suggestion.frequency && (
+                    <span className="text-xs text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full flex-shrink-0">
+                      ⭐ {suggestion.frequency}x
+                    </span>
+                  )}
+                  <span className="truncate">{suggestion.text}</span>
+                </div>
+              </button>
+            ))
+          ) : (
+            // Fallback to default suggestions
+            <>
+              <button
+                onClick={() => {
+                  setTextInput('Create a menu image for grilled salmon with lemon butter')
+                  setInputMode('text')
+                }}
+                className="text-left bg-stone-800/50 border border-stone-700 hover:border-amber-500/40 hover:bg-stone-800 rounded-xl px-4 py-3 text-stone-400 hover:text-stone-200 transition-all"
+              >
+                📸 "Create a menu image for grilled salmon with lemon butter"
+              </button>
+              <button
+                onClick={() => {
+                  setTextInput('Make an Instagram post for our summer promotion')
+                  setInputMode('text')
+                }}
+                className="text-left bg-stone-800/50 border border-stone-700 hover:border-amber-500/40 hover:bg-stone-800 rounded-xl px-4 py-3 text-stone-400 hover:text-stone-200 transition-all"
+              >
+                📱 "Make an Instagram post for our summer promotion"
+              </button>
+              <button
+                onClick={() => {
+                  setTextInput('Generate a photo for the truffle pasta dish')
+                  setInputMode('text')
+                }}
+                className="text-left bg-stone-800/50 border border-stone-700 hover:border-amber-500/40 hover:bg-stone-800 rounded-xl px-4 py-3 text-stone-400 hover:text-stone-200 transition-all"
+              >
+                🍝 "Generate a photo for the truffle pasta dish"
+              </button>
+              <button
+                onClick={() => {
+                  setTextInput('Create a football pitch promotional image')
+                  setInputMode('text')
+                }}
+                className="text-left bg-stone-800/50 border border-stone-700 hover:border-amber-500/40 hover:bg-stone-800 rounded-xl px-4 py-3 text-stone-400 hover:text-stone-200 transition-all"
+              >
+                ⚽ "Create a football pitch promotional image"
+              </button>
+            </>
           )}
-          <span className="truncate">{suggestion.text}</span>
         </div>
-      </button>
-    ))
-  ) : (
-    // Fallback to default suggestions - exactly 2
-    <>
-      <button
-        onClick={() => {
-          setTextInput('Create a menu image for grilled salmon with lemon butter')
-          setInputMode('text')
-        }}
-        className="text-left bg-stone-800/50 border border-stone-700 hover:border-amber-500/40 hover:bg-stone-800 rounded-xl px-4 py-3 text-stone-400 hover:text-stone-200 transition-all"
-      >
-        📸 "Create a menu image for grilled salmon with lemon butter"
-      </button>
-      <button
-        onClick={() => {
-          setTextInput('Make an Instagram post for our summer promotion')
-          setInputMode('text')
-        }}
-        className="text-left bg-stone-800/50 border border-stone-700 hover:border-amber-500/40 hover:bg-stone-800 rounded-xl px-4 py-3 text-stone-400 hover:text-stone-200 transition-all"
-      >
-        📱 "Make an Instagram post for our summer promotion"
-      </button>
-    </>
-  )}
-</div>
 
         <div className="w-full space-y-4">
           <div className="flex items-center gap-2 bg-stone-800 rounded-full p-1 w-fit mx-auto">

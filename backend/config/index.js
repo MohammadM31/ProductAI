@@ -30,9 +30,6 @@ export const config = {
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
   publicBaseUrl: process.env.PUBLIC_BASE_URL || 'http://localhost:5000',
 
-  // ============================================================
-  // SWITCH BACK TO OPENAI
-  // ============================================================
   openai: {
     apiKey: process.env.OPENAI_API_KEY || '',
     model: process.env.OPENAI_MODEL || 'gpt-4o',
@@ -41,19 +38,17 @@ export const config = {
     audioModel: process.env.OPENAI_AUDIO_MODEL || 'whisper-1',
   },
 
-  // Comment out or remove DeepSeek
-  // deepseek: {
-  //   apiKey: process.env.DEEPSEEK_API_KEY || '',
-  //   model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
-  //   visionModel: process.env.DEEPSEEK_VISION_MODEL || 'deepseek-vl',
-  //   baseURL: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
-  // },
+  // ============================================================
+  // NANO BANANA 2 CONFIG
+  // ============================================================
+  nanobanana: {
+    apiKey: process.env.NANOBANANA_API_KEY || '',
+    model: process.env.NANOBANANA_MODEL || 'nano-banana-2',
+    baseUrl: process.env.NANOBANANA_BASE_URL || 'https://api.nanobanana.ai/v1',
+    maxTokens: parseInt(process.env.NANOBANANA_MAX_TOKENS || '4096', 10),
+  },
 
-  // Comment out or remove Deepgram
-  // deepgram: {
-  //   apiKey: process.env.DEEPGRAM_API_KEY || '',
-  // },
-
+  // Replicate as fallback
   replicate: {
     apiKey: process.env.REPLICATE_API_TOKEN || '',
     imageModel: process.env.REPLICATE_IMAGE_MODEL || 'flux-schnell',
@@ -88,4 +83,10 @@ console.log('🔌 OpenSearch Configuration:', {
   useSsl: config.opensearch.useSsl,
   hasCaCert: !!config.opensearch.caCert,
   rejectUnauthorized: config.opensearch.rejectUnauthorized,
+})
+
+console.log('🖼️ Image Generation:', {
+  provider: config.nanobanana.apiKey ? 'Nano Banana 2 (primary)' : 'Replicate (fallback)',
+  hasNanobananaKey: !!config.nanobanana.apiKey,
+  hasReplicateKey: !!config.replicate.apiKey,
 })

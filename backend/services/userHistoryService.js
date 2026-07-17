@@ -1,4 +1,3 @@
-// services/userHistoryService.js
 import { searchDocuments, indexDocument, getDocument } from './databaseService.js'
 import { config } from '../config/index.js'
 import OpenAI from 'openai'
@@ -24,7 +23,7 @@ export async function trackUserRequest(userId, projectId, requestText) {
       user_id: userId,
       project_id: projectId,
       request_text: requestText,
-      keywords: keywords,  // ← Store extracted keywords
+      keywords: keywords,
       timestamp: new Date().toISOString()
     }
     
@@ -37,23 +36,25 @@ export async function trackUserRequest(userId, projectId, requestText) {
 
 // Simple keyword extraction
 function extractKeywords(text) {
-  // Remove common words and extract meaningful terms
   const stopWords = ['the', 'a', 'an', 'and', 'or', 'but', 'for', 'on', 'at', 'to', 'for', 'of', 'with', 'without']
   const words = text.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/)
   return words.filter(w => w.length > 3 && !stopWords.includes(w))
 }
 
-export async function getPersonalizedSuggestions(userId, limit = 4) {
+// ============================================================
+// CHANGED: Limit to exactly 2 suggestions
+// ============================================================
+export async function getPersonalizedSuggestions(userId, limit = 2) {  // ← Changed to 2
   try {
     // Get user's request history
     const history = await searchDocuments(config.indices.user_history, {
       query: { term: { user_id: userId } },
       sort: [{ timestamp: { order: 'desc' } }],
-      size: 50  // Get last 50 requests
+      size: 50
     })
     
     if (history.length === 0) {
-      return getDefaultSuggestions()
+      return getDefaultSuggestions()  // This now returns 2 suggestions
     }
     
     // Get all projects
@@ -84,7 +85,7 @@ async function generateSuggestionsWithDeepSeek(history, projects, limit) {
     // Get available project names
     const projectNames = projects.map(p => p.name).join(', ')
     
-    // Build prompt for DeepSeek
+    // Build prompt for DeepSeek - NOW ASKING FOR EXACTLY 2
     const prompt = `You are a personalization engine analyzing user request patterns.
 
 USER'S REQUEST HISTORY (last 20 requests):
@@ -93,13 +94,13 @@ ${historySummary}
 AVAILABLE PROJECTS:
 ${projectNames}
 
-ANALYZE THE USER'S PATTERNS AND GENERATE 4 SUGGESTIONS:
+ANALYZE THE USER'S PATTERNS AND GENERATE EXACTLY 2 SUGGESTIONS:
 
 1. What does the user request most frequently? What patterns do you see?
 2. What keywords or themes appear most often?
 3. What would be the most helpful suggestions for this user?
 
-Based on your analysis, generate EXACTLY 4 suggestions that would be most helpful. Each suggestion should be a complete, actionable request that the user can use.
+Based on your analysis, generate EXACTLY 2 suggestions that would be most helpful. Each suggestion should be a complete, actionable request that the user can use.
 
 Return your response as a JSON array:
 [
@@ -124,7 +125,8 @@ ONLY return the JSON array, no other text.`
     
     // Ensure we have the right format
     if (Array.isArray(suggestions)) {
-      return suggestions.slice(0, limit).map(s => ({
+      // Slice to exactly 2
+      return suggestions.slice(0, 2).map(s => ({
         text: s.text,
         frequency: s.frequency || 1,
         project_name: s.project_name || null,
@@ -145,8 +147,10 @@ function getProjectName(projects, projectId) {
   return project ? project.name : 'Unknown Project'
 }
 
+// ============================================================
+// CHANGED: Fallback suggestions now returns exactly 2
+// ============================================================
 function getFallbackSuggestions(history, projects) {
-  // Fallback: use most frequent project + variations
   const projectFrequency = {}
   const requestExamples = {}
   
@@ -164,7 +168,7 @@ function getFallbackSuggestions(history, projects) {
   
   const sorted = Object.entries(projectFrequency)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 4)
+    .slice(0, 2)  // ← Changed to exactly 2
   
   const suggestions = []
   for (const [projectId, count] of sorted) {
@@ -172,31 +176,22 @@ function getFallbackSuggestions(history, projects) {
     const examples = requestExamples[projectId] || []
     const example = examples.length > 0 ? examples[0] : `Generate a ${project?.name || 'project'}`
     
-    // Create variations
     suggestions.push({ 
       text: example, 
       frequency: count,
       project_name: project?.name || null
     })
-    
-    // Add a variation if possible
-    if (examples.length > 1) {
-      suggestions.push({ 
-        text: examples[1], 
-        frequency: count - 1,
-        project_name: project?.name || null
-      })
-    }
   }
   
-  return suggestions.slice(0, 4)
+  return suggestions.slice(0, 2)  // ← Changed to exactly 2
 }
 
+// ============================================================
+// CHANGED: Default suggestions now returns exactly 2
+// ============================================================
 function getDefaultSuggestions() {
   return [
-    { text: 'Create a menu image for grilled salmon with lemon butter' },
-    { text: 'Make an Instagram post for our summer promotion' },
-    { text: 'Generate a photo for the truffle pasta dish' },
-    { text: 'Create a football pitch promotional image' },
-  ].map(s => ({ ...s, frequency: 1 }))
+    { text: 'Create a menu image for grilled salmon with lemon butter', frequency: 1 },
+    { text: 'Make an Instagram post for our summer promotion', frequency: 1 },
+  ]  // ← Only 2 suggestions
 }

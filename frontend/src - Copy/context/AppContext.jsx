@@ -1,5 +1,3 @@
-// context/AppContext.jsx
-
 import React, { createContext, useContext, useReducer, useCallback, useEffect } from 'react'
 import { authApi } from '../api/client'
 
@@ -20,14 +18,7 @@ const initialState = {
   transcription: null,
   originalRequest: null,
   
-  // Image history for session
-  imageHistory: [],
-  historyIndex: -1,
-  
-  // Store the last generated image URL as reference
-  lastGeneratedImageUrl: null,
-  
-  // Persist input state
+  // NEW: Persist input state
   textInput: '',
   inputMode: 'voice',
   showGuidelines: false,
@@ -56,27 +47,7 @@ function reducer(state, action) {
     case 'SET_ORIGINAL_REQUEST':
       return { ...state, originalRequest: action.payload }
     case 'SET_CURRENT_OUTPUT':
-      // Add to history when a new output is generated
-      const newHistoryEntry = {
-        id: action.payload.output_id || `output-${Date.now()}`,
-        output: action.payload,
-        timestamp: new Date().toISOString(),
-        project: action.payload.project || null,
-        imageUrl: action.payload.content, // Store the image URL
-      }
-      // If we're not at the end of history, truncate
-      const historyBefore = state.imageHistory.slice(0, state.historyIndex + 1)
-      const newHistory = [...historyBefore, newHistoryEntry]
-      
-      return { 
-        ...state, 
-        currentOutput: action.payload, 
-        requestStatus: 'done',
-        imageHistory: newHistory,
-        historyIndex: newHistory.length - 1,
-        // Store the last generated image URL as reference
-        lastGeneratedImageUrl: action.payload.content,
-      }
+      return { ...state, currentOutput: action.payload, requestStatus: 'done' }
     case 'CLEAR_OUTPUT':
       return { 
         ...state, 
@@ -85,40 +56,15 @@ function reducer(state, action) {
         transcription: null, 
         originalRequest: null, 
         sessionId: crypto.randomUUID(),
-        imageHistory: [],
-        historyIndex: -1,
-        lastGeneratedImageUrl: null,
+        // Keep text input and UI state
       }
-    case 'GO_BACK_IN_HISTORY':
-      if (state.historyIndex > 0) {
-        const newIndex = state.historyIndex - 1
-        const previousOutput = state.imageHistory[newIndex]?.output || null
-        return {
-          ...state,
-          historyIndex: newIndex,
-          currentOutput: previousOutput,
-          lastGeneratedImageUrl: previousOutput?.content || null,
-        }
-      }
-      return state
-    case 'GO_FORWARD_IN_HISTORY':
-      if (state.historyIndex < state.imageHistory.length - 1) {
-        const newIndex = state.historyIndex + 1
-        const nextOutput = state.imageHistory[newIndex]?.output || null
-        return {
-          ...state,
-          historyIndex: newIndex,
-          currentOutput: nextOutput,
-          lastGeneratedImageUrl: nextOutput?.content || null,
-        }
-      }
-      return state
     case 'SET_ADMIN_TAB':
       return { ...state, adminTab: action.payload }
     case 'SET_ERROR':
       return { ...state, error: action.payload, requestStatus: 'idle' }
     case 'CLEAR_ERROR':
       return { ...state, error: null }
+    // NEW: Actions for persisting UI state
     case 'SET_TEXT_INPUT':
       return { ...state, textInput: action.payload }
     case 'SET_INPUT_MODE':
@@ -135,9 +81,6 @@ function reducer(state, action) {
         transcription: null,
         originalRequest: null,
         sessionId: crypto.randomUUID(),
-        imageHistory: [],
-        historyIndex: -1,
-        lastGeneratedImageUrl: null,
       }
     default:
       return state
@@ -147,6 +90,7 @@ function reducer(state, action) {
 export function AppProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState)
 
+  // Try to restore session from stored token
   useEffect(() => {
     const token = localStorage.getItem('auth_token')
     if (!token) {
@@ -175,29 +119,8 @@ export function AppProvider({ children }) {
     dispatch({ type: 'LOGOUT' })
   }, [])
 
-  const goBack = useCallback(() => {
-    dispatch({ type: 'GO_BACK_IN_HISTORY' })
-  }, [])
-
-  const goForward = useCallback(() => {
-    dispatch({ type: 'GO_FORWARD_IN_HISTORY' })
-  }, [])
-
-  const canGoBack = state.historyIndex > 0
-  const canGoForward = state.historyIndex < state.imageHistory.length - 1
-
   return (
-    <AppContext.Provider value={{ 
-      state, 
-      dispatch, 
-      login, 
-      logout,
-      goBack,
-      goForward,
-      canGoBack,
-      canGoForward,
-      historyLength: state.imageHistory.length,
-    }}>
+    <AppContext.Provider value={{ state, dispatch, login, logout }}>
       {children}
     </AppContext.Provider>
   )

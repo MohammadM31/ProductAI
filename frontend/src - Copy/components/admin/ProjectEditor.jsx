@@ -27,15 +27,14 @@ export default function ProjectEditor({ project, departments, user, onSave, onDe
 
   // Available image models
   const imageModels = [
-    // Nano Banana 2 models
-    { value: 'nano-banana-2', label: 'Nano Banana 2 (Best quality, fast, supports reference images)' },
-    { value: 'nano-banana-2-xl', label: 'Nano Banana 2 XL (Ultra HD, slower, supports reference images)' },
-    
-    // Replicate fallback models
     { value: 'flux-schnell', label: 'FLUX Schnell (Fast, $0.003/image) — no reference image support' },
-    { value: 'flux-1.1-pro', label: 'FLUX-1.1-Pro (Good quality, $0.04/image) — no reference image support' },
+    { value: 'flux-1.1-pro', label: 'FLUX-1.1-Pro (Best quality, $0.04/image) — no reference image support' },
     { value: 'flux-dev', label: 'FLUX Dev (Good quality, $0.015/image) — honors reference image' },
     { value: 'sdxl', label: 'SDXL (Stable Diffusion, $0.003/image) — honors reference image' },
+    { value: 'flux-kontext-pro', label: 'FLUX Kontext Pro (Best for product refs, $0.04/image) — honors reference image' },
+    { value: 'flux-kontext-max', label: 'FLUX Kontext Max (Premium, $0.08/image) — honors reference image' },
+    { value: 'recraft-v4', label: 'Recraft V4 (Design-first, $0.04/image) — no reference image support' },
+    { value: 'recraft-v4-svg', label: 'Recraft V4 SVG (Vector output, $0.04/image) — no reference image support' },
   ]
 
   // Load project data if editing

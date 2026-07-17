@@ -1,18 +1,7 @@
 import React, { useState } from 'react'
-import { CheckCircle, RefreshCw, Send, ChevronDown, ChevronUp, ImageIcon, FileText, ArrowLeft, ArrowRight, History } from 'lucide-react'
+import { CheckCircle, RefreshCw, Send, ChevronDown, ChevronUp, ImageIcon, FileText } from 'lucide-react'
 
-export default function OutputDisplay({ 
-  output, 
-  onIterate, 
-  onConfirm, 
-  disabled,
-  onGoBack,
-  onGoForward,
-  canGoBack,
-  canGoForward,
-  historyIndex,
-  historyLength,
-}) {
+export default function OutputDisplay({ output, onIterate, onConfirm, disabled }) {
   const [feedback, setFeedback] = useState('')
   const [showPrompt, setShowPrompt] = useState(false)
   const [confirming, setConfirming] = useState(false)
@@ -58,45 +47,12 @@ export default function OutputDisplay({
 
   return (
     <div className="flex flex-col gap-4 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 rounded-full px-3 py-1 text-xs text-amber-400">
-            {output.output_type === 'image' ? <ImageIcon size={12} /> : <FileText size={12} />}
-            {output.project?.name || 'Generated Output'}
-          </div>
-          <span className="text-xs text-stone-500">
-            Version {historyIndex + 1}/{historyLength}
-          </span>
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 rounded-full px-3 py-1 text-xs text-amber-400">
+          {output.output_type === 'image' ? <ImageIcon size={12} /> : <FileText size={12} />}
+          {output.project?.name}
         </div>
-
-        {/* History Navigation */}
-        <div className="flex items-center gap-1">
-          <button
-            onClick={onGoBack}
-            disabled={!canGoBack || disabled}
-            className={`p-1.5 rounded-lg transition-colors ${
-              canGoBack && !disabled
-                ? 'hover:bg-stone-700 text-stone-400 hover:text-stone-200'
-                : 'text-stone-600 cursor-not-allowed'
-            }`}
-            title="Previous version"
-          >
-            <ArrowLeft size={16} />
-          </button>
-          <button
-            onClick={onGoForward}
-            disabled={!canGoForward || disabled}
-            className={`p-1.5 rounded-lg transition-colors ${
-              canGoForward && !disabled
-                ? 'hover:bg-stone-700 text-stone-400 hover:text-stone-200'
-                : 'text-stone-600 cursor-not-allowed'
-            }`}
-            title="Next version"
-          >
-            <ArrowRight size={16} />
-          </button>
-          
-        </div>
+        <span className="text-xs text-stone-500">Generated output</span>
       </div>
 
       <div className="rounded-2xl overflow-hidden border border-stone-700 bg-stone-900">
@@ -171,19 +127,9 @@ export default function OutputDisplay({
           <Send size={15} />
           {confirming ? 'Sending to department…' : 'Confirm & Send to Department'}
         </button>
-        
-        {/* History info */}
-        {historyLength > 1 && (
-          <div className="flex items-center justify-center gap-2 pt-2 border-t border-stone-700/50 text-xs text-stone-500">
-            <History size={12} />
-            <span>
-              {historyLength} versions available • 
-              {canGoBack && ' ⬅️ Go back to previous'}
-              {canGoForward && ' ➡️ Go forward to newer'}
-              {!canGoBack && !canGoForward && ' Latest version'}
-            </span>
-          </div>
-        )}
+        <p className="text-xs text-stone-500 text-center">
+          The Marketing Department will receive this output for final polish and publishing.
+        </p>
       </div>
     </div>
   )
